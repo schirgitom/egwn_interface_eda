@@ -20,7 +20,28 @@ public sealed class EdaPortalClient(HttpClient httpClient, IOptions<EdaOptions> 
     private string? _token;
     private DateTimeOffset? _tokenExpiryUtc;
 
-    public async Task<EdaPeriodSnapshot> FetchPeriodAsync(string communityId, EdaPeriodDefinition period, CancellationToken cancellationToken)
+    public async Task<EdaKpiData?> FetchKpiAsync(string communityId, string meterId, EdaPeriodDefinition period, CancellationToken cancellationToken)
+    {
+        var body = new
+        {
+            energyCommunityId = communityId,
+            meterId,
+            groupBy = period.GroupBy,
+            time = new
+            {
+                @in = new
+                {
+                    min = ToEdaTimestamp(period.From),
+                    max = ToEdaTimestamp(period.To)
+                }
+            }
+        };
+
+        var envelope = await PostAsync<EdaApiEnvelope<EdaKpiDto>>($"pwa/energycommunities/{communityId}/kpiData", body, cancellationToken);
+        return MapKpi(envelope);
+    }
+
+    public async Task<EdaMeterData?> FetchMeterDataAsync(string communityId, EdaPeriodDefinition period, CancellationToken cancellationToken)
     {
         var body = new
         {
@@ -36,19 +57,52 @@ public sealed class EdaPortalClient(HttpClient httpClient, IOptions<EdaOptions> 
             }
         };
 
-        var kpiTask = PostAsync<EdaApiEnvelope<EdaKpiDto>>($"/pwa/energycommunities/{communityId}/kpiData", body, cancellationToken);
-        var meterTask = PostAsync<EdaApiEnvelope<EdaMeterDto>>($"/pwa/energycommunities/{communityId}/meterdata", body, cancellationToken);
-
-        await Task.WhenAll(kpiTask, meterTask);
-
-        return new EdaPeriodSnapshot(
-            period,
-            MapKpi(kpiTask.Result),
-            MapMeter(meterTask.Result),
-            DateTimeOffset.UtcNow);
+        var envelope = await PostAsync<EdaApiEnvelope<EdaMeterDto>>($"pwa/energycommunities/{communityId}/meterdata", body, cancellationToken);
+        return MapMeter(envelope);
     }
 
-    private async Task<T> PostAsync<T>(string relativePath, object body, CancellationToken cancellationToken)
+    public async Task<EdaConsumptionSuryaData?> FetchConsumptionSuryaAsync(
+        string communityId,
+        string meterId,
+        EdaPeriodDefinition period,
+        EdaConsumptionSuryaRoute route,
+        CancellationToken cancellationToken)
+    {
+        var body = new
+        {
+            energyCommunityId = communityId,
+            name = meterId,
+            groupBy = period.GroupBy,
+            time = new
+            {
+                @in = new
+                {
+                    min = ToEdaTimestamp(period.From),
+                    max = ToEdaTimestamp(period.To)
+                }
+            }
+        };
+
+        var routeSegment = route == EdaConsumptionSuryaRoute.G ? "g" : "p";
+        var endpoint = $"{_options.ConsumptionSuryaBaseUrl.TrimEnd('/')}/consumptionsurya/{routeSegment}/{Uri.EscapeDataString(meterId)}";
+        var envelope = await PostAsync<EdaConsumptionSuryaEnvelope>(endpoint, body, cancellationToken);
+        return MapConsumptionSurya(envelope);
+    }
+
+    public async Task<IReadOnlyList<EdaConsumptionSuryaPoint>> FetchConsumptionSuryaPointsAsync(
+        string communityId,
+        string meterId,
+        EdaPeriodDefinition period,
+        CancellationToken cancellationToken)
+    {
+        var gTask = FetchConsumptionSuryaAsync(communityId, meterId, period, EdaConsumptionSuryaRoute.G, cancellationToken);
+        var pTask = FetchConsumptionSuryaAsync(communityId, meterId, period, EdaConsumptionSuryaRoute.P, cancellationToken);
+        await Task.WhenAll(gTask, pTask);
+
+        return MergeConsumptionSurya(gTask.Result, pTask.Result);
+    }
+
+    private async Task<T?> PostAsync<T>(string relativePath, object body, CancellationToken cancellationToken)
     {
         var token = await GetTokenAsync(cancellationToken);
         using var request = new HttpRequestMessage(HttpMethod.Post, relativePath)
@@ -60,8 +114,14 @@ public sealed class EdaPortalClient(HttpClient httpClient, IOptions<EdaOptions> 
         using var response = await httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
 
-        var payload = await response.Content.ReadFromJsonAsync<T>(SerializerOptions, cancellationToken);
-        return payload ?? throw new InvalidOperationException($"EDA response from '{relativePath}' could not be parsed");
+        var raw = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            logger.LogWarning("EDA endpoint '{Path}' returned an empty response body", relativePath);
+            return default;
+        }
+
+        return JsonSerializer.Deserialize<T>(raw, SerializerOptions);
     }
 
     private async Task<string> GetTokenAsync(CancellationToken cancellationToken)
@@ -80,7 +140,7 @@ public sealed class EdaPortalClient(HttpClient httpClient, IOptions<EdaOptions> 
             }
 
             logger.LogInformation("Logging in to EDA portal");
-            using var response = await httpClient.PostAsJsonAsync("/v4/auth/login", new
+            using var response = await httpClient.PostAsJsonAsync(_options.LoginUrl, new
             {
                 email = _options.Username,
                 password = _options.Password
@@ -95,7 +155,7 @@ public sealed class EdaPortalClient(HttpClient httpClient, IOptions<EdaOptions> 
             }
 
             _token = auth.Token;
-            _tokenExpiryUtc = ParseJwtExpiry(auth.Token);
+            _tokenExpiryUtc = ParseExpiry(auth.Exp) ?? ParseJwtExpiry(auth.Token);
             logger.LogInformation("EDA login succeeded; token expires at {Expiry}", _tokenExpiryUtc);
             return auth.Token;
         }
@@ -105,9 +165,9 @@ public sealed class EdaPortalClient(HttpClient httpClient, IOptions<EdaOptions> 
         }
     }
 
-    private static EdaKpiData? MapKpi(EdaApiEnvelope<EdaKpiDto> envelope)
+    private static EdaKpiData? MapKpi(EdaApiEnvelope<EdaKpiDto>? envelope)
     {
-        if (!envelope.Success || envelope.Data is null)
+        if (envelope is null || !envelope.Success || envelope.Data is null)
         {
             return null;
         }
@@ -115,18 +175,126 @@ public sealed class EdaPortalClient(HttpClient httpClient, IOptions<EdaOptions> 
         return new EdaKpiData(envelope.Data.Autarky, envelope.Data.OwnConsumption, envelope.Data.Community, envelope.Data.Feed, envelope.Data.RemainingDemand);
     }
 
-    private static EdaMeterData? MapMeter(EdaApiEnvelope<EdaMeterDto> envelope)
+    private static EdaMeterData? MapMeter(EdaApiEnvelope<EdaMeterDto>? envelope)
     {
-        if (!envelope.Success || envelope.Data is null)
+        if (envelope is null || !envelope.Success || envelope.Data is null)
         {
             return null;
         }
 
         return new EdaMeterData(
+            envelope.Data.SubstitutesOrMissingData,
             envelope.Data.SumGeneration,
             envelope.Data.SumFeed,
-            envelope.Data.GenerationSeries ?? [],
-            envelope.Data.FeedSeries ?? []);
+            MapSeries(envelope.Data.GenerationSeries),
+            MapSeries(envelope.Data.FeedSeries));
+    }
+
+    private static EdaConsumptionSuryaData? MapConsumptionSurya(EdaConsumptionSuryaEnvelope? envelope)
+    {
+        if (envelope is null || !envelope.Success || envelope.Data.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var points = new List<EdaSeriesPoint>();
+        foreach (var item in envelope.Data.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Array || item.GetArrayLength() < 2)
+            {
+                continue;
+            }
+
+            var timestamp = ParseEdaTimestamp(item[0].GetString());
+            var value = item[1].ValueKind switch
+            {
+                JsonValueKind.Number => item[1].GetDecimal(),
+                JsonValueKind.String when decimal.TryParse(item[1].GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var parsed) => parsed,
+                _ => 0m
+            };
+
+            points.Add(new EdaSeriesPoint(timestamp, value, null));
+        }
+
+        return new EdaConsumptionSuryaData(points, envelope.Meta?.ScaleX, []);
+    }
+
+    private static IReadOnlyList<EdaConsumptionSuryaPoint> MergeConsumptionSurya(EdaConsumptionSuryaData? g, EdaConsumptionSuryaData? p)
+    {
+        var series = new Dictionary<DateTimeOffset, (decimal? G, decimal? P)>();
+
+        if (g is not null)
+        {
+            foreach (var point in g.Series)
+            {
+                if (point.Timestamp is null)
+                {
+                    continue;
+                }
+
+                var timestamp = point.Timestamp.Value;
+                series[timestamp] = series.TryGetValue(timestamp, out var existing)
+                    ? (point.Value, existing.P)
+                    : (point.Value, null);
+            }
+        }
+
+        if (p is not null)
+        {
+            foreach (var point in p.Series)
+            {
+                if (point.Timestamp is null)
+                {
+                    continue;
+                }
+
+                var timestamp = point.Timestamp.Value;
+                series[timestamp] = series.TryGetValue(timestamp, out var existing)
+                    ? (existing.G, point.Value)
+                    : (null, point.Value);
+            }
+        }
+
+        return series
+            .OrderBy(entry => entry.Key)
+            .Select(entry =>
+            {
+                var difference = entry.Value.G.HasValue && entry.Value.P.HasValue
+                    ? (decimal?)(entry.Value.G.Value - entry.Value.P.Value)
+                    : null;
+
+                return new EdaConsumptionSuryaPoint(entry.Key, entry.Value.G, entry.Value.P, difference);
+            })
+            .ToArray();
+    }
+
+    private static IReadOnlyList<EdaSeriesPoint> MapSeries(IReadOnlyList<EdaSeriesPointDto>? series)
+    {
+        if (series is null || series.Count == 0)
+        {
+            return [];
+        }
+
+        return series.Select(point => new EdaSeriesPoint(
+            ParseEdaTimestamp(point.Date),
+            point.Value,
+            point.Methods)).ToArray();
+    }
+
+    private static DateTimeOffset? ParseEdaTimestamp(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return DateTimeOffset.TryParse(
+            value,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+            out var timestamp)
+            ? timestamp
+            : null;
     }
 
     private static string ToEdaTimestamp(DateTimeOffset value) => value.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
@@ -156,13 +324,29 @@ public sealed class EdaPortalClient(HttpClient httpClient, IOptions<EdaOptions> 
         }
     }
 
+    private static DateTimeOffset? ParseExpiry(JsonElement exp)
+    {
+        return exp.ValueKind switch
+        {
+            JsonValueKind.String when DateTimeOffset.TryParse(
+                exp.GetString(),
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                out var dateTimeOffset) => dateTimeOffset,
+            JsonValueKind.Number when exp.TryGetInt64(out var unixSeconds) => DateTimeOffset.FromUnixTimeSeconds(unixSeconds),
+            _ => null
+        };
+    }
+
     private static byte[] Base64UrlDecode(string input)
     {
         var output = input.Replace('-', '+').Replace('_', '/');
         return Convert.FromBase64String(output.PadRight(output.Length + (4 - output.Length % 4) % 4, '='));
     }
 
-    private sealed record EdaLoginResponse([property: JsonPropertyName("token")] string Token);
+    private sealed record EdaLoginResponse(
+        [property: JsonPropertyName("token")] string Token,
+        [property: JsonPropertyName("exp")] JsonElement Exp);
 
     private sealed record EdaApiEnvelope<T>(
         [property: JsonPropertyName("success")] bool Success,
@@ -176,8 +360,22 @@ public sealed class EdaPortalClient(HttpClient httpClient, IOptions<EdaOptions> 
         [property: JsonPropertyName("remainingDemand")] decimal? RemainingDemand);
 
     private sealed record EdaMeterDto(
+        [property: JsonPropertyName("substitutesOrMissingData")] bool? SubstitutesOrMissingData,
         [property: JsonPropertyName("sumGeneration")] decimal? SumGeneration,
         [property: JsonPropertyName("sumFeed")] decimal? SumFeed,
-        [property: JsonPropertyName("generationSeries")] IReadOnlyList<EdaSeriesPoint>? GenerationSeries,
-        [property: JsonPropertyName("feedSeries")] IReadOnlyList<EdaSeriesPoint>? FeedSeries);
+        [property: JsonPropertyName("generationSeries")] IReadOnlyList<EdaSeriesPointDto>? GenerationSeries,
+        [property: JsonPropertyName("feedSeries")] IReadOnlyList<EdaSeriesPointDto>? FeedSeries);
+
+    private sealed record EdaConsumptionSuryaEnvelope(
+        [property: JsonPropertyName("success")] bool Success,
+        [property: JsonPropertyName("data")] JsonElement Data,
+        [property: JsonPropertyName("meta")] EdaConsumptionSuryaMeta? Meta);
+
+    private sealed record EdaConsumptionSuryaMeta(
+        [property: JsonPropertyName("scale_x")] string? ScaleX);
+
+    private sealed record EdaSeriesPointDto(
+        [property: JsonPropertyName("date")] string? Date,
+        [property: JsonPropertyName("value")] decimal Value,
+        [property: JsonPropertyName("methods")] string? Methods);
 }

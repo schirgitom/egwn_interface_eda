@@ -38,9 +38,12 @@ public sealed class EdaSyncOrchestrator(
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var snapshot = await edaPortalClient.FetchPeriodAsync(customerGroup.Key, period, cancellationToken);
+                var meter = await edaPortalClient.FetchMeterDataAsync(customerGroup.Key, period, cancellationToken);
                 foreach (var customer in customerGroup)
                 {
+                    var meterId = ResolveMeterId(customer);
+                    var kpi = await edaPortalClient.FetchKpiAsync(customerGroup.Key, meterId, period, cancellationToken);
+                    var snapshot = new EdaPeriodSnapshot(period, kpi, meter, clock.UtcNow);
                     var publication = new EdaSyncPublication(customer, customerGroup.Key, snapshot, clock.UtcNow);
                     await publisher.PublishAsync(publication, cancellationToken);
                 }
@@ -49,4 +52,9 @@ public sealed class EdaSyncOrchestrator(
             }
         }
     }
+
+    private static string ResolveMeterId(CustomerMeterPoint customer) =>
+        !string.IsNullOrWhiteSpace(customer.ExternalReference)
+            ? customer.ExternalReference
+            : customer.MeterPointNumber;
 }

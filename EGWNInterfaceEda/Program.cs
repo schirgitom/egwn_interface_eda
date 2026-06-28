@@ -18,6 +18,8 @@ builder.Services.AddOptions<CentralApiOptions>()
 builder.Services.AddOptions<EdaOptions>()
     .BindConfiguration(EdaOptions.SectionName)
     .Validate(options => !string.IsNullOrWhiteSpace(options.BaseUrl), "Eda:BaseUrl is required")
+    .Validate(options => !string.IsNullOrWhiteSpace(options.LoginUrl), "Eda:LoginUrl is required")
+    .Validate(options => !string.IsNullOrWhiteSpace(options.ConsumptionSuryaBaseUrl), "Eda:ConsumptionSuryaBaseUrl is required")
     .Validate(options => !string.IsNullOrWhiteSpace(options.Username), "Eda:Username is required")
     .Validate(options => !string.IsNullOrWhiteSpace(options.Password), "Eda:Password is required")
     .Validate(options => !string.IsNullOrWhiteSpace(options.CommunityId), "Eda:CommunityId is required");
@@ -48,7 +50,7 @@ builder.Services.AddHttpClient<ICentralApiClient, CentralApiClient>((sp, client)
 builder.Services.AddHttpClient<IEdaPortalClient, EdaPortalClient>((sp, client) =>
 {
     var options = sp.GetRequiredService<IOptions<EdaOptions>>().Value;
-    client.BaseAddress = new Uri(options.BaseUrl, UriKind.Absolute);
+    client.BaseAddress = new Uri($"{options.BaseUrl.TrimEnd('/')}/", UriKind.Absolute);
     client.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
 });
 

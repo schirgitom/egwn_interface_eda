@@ -2,4 +2,5 @@ namespace EGWNInterfaceEda.Domain;
 
 public sealed record EdaSeriesPoint(
     DateTimeOffset? Timestamp,
-    decimal Value);
+    decimal Value,
+    string? Methods);
