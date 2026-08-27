@@ -18,17 +18,23 @@ public sealed record EdaPeriodDefinition(string Key, DateTimeOffset From, DateTi
         var customFromDate = customFrom ?? DateOnly.FromDateTime(now.DateTime);
         var customToDate = customTo ?? customFromDate;
 
+        var customStart = StartOfDay(customFromDate.ToDateTime(TimeOnly.MinValue), now.Offset);
+        var customEnd = EndOfDay(StartOfDay(customToDate.ToDateTime(TimeOnly.MinValue), now.Offset).AddHours(23).AddMinutes(45), now.Offset);
+
         return
         [
             new("heute", today, EndOfDay(today, now.Offset), "day"),
+            new("heute-stündlich", today, EndOfDay(today, now.Offset), "hour"),
             new("gestern", yesterday, EndOfDay(yesterday, now.Offset), "day"),
+            new("gestern-stündlich", yesterday, EndOfDay(yesterday, now.Offset), "hour"),
             new("woche", weekStart, EndOfDay(weekStart.AddDays(6), now.Offset), "day"),
             new("vorwoche", prevWeekStart, EndOfDay(prevWeekStart.AddDays(6), now.Offset), "day"),
             new("monat", monthStart, EndOfDay(nextMonthStart.AddDays(-1), now.Offset), "month"),
             new("vormonat", prevMonthStart, EndOfDay(monthStart.AddDays(-1), now.Offset), "month"),
             new("jahr", yearStart, EndOfDay(nextYearStart.AddDays(-1), now.Offset), "year"),
             new("vorjahr", prevYearStart, EndOfDay(yearStart.AddDays(-1), now.Offset), "year"),
-            new("custom", StartOfDay(customFromDate.ToDateTime(TimeOnly.MinValue), now.Offset), EndOfDay(StartOfDay(customToDate.ToDateTime(TimeOnly.MinValue), now.Offset).AddHours(23).AddMinutes(45), now.Offset), "month"),
+            new("custom", customStart, customEnd, "month"),
+            new("custom-stündlich", customStart, customEnd, "hour"),
         ];
     }
 

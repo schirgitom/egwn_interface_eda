@@ -40,9 +40,11 @@ public sealed class EdaSyncOrchestratorTests
         await sut.RunAsync(CancellationToken.None);
 
         Assert.Equal(expectedPeriods, portalClient.MeterCalls.Count);
+        Assert.Contains(portalClient.MeterCalls, call => call.Period.GroupBy == "hour");
         Assert.All(portalClient.MeterCalls, call => Assert.Equal("community-1", call.CommunityId));
 
         Assert.Equal(expectedPeriods * 2, portalClient.KpiCalls.Count);
+        Assert.Contains(portalClient.KpiCalls, call => call.Period.GroupBy == "hour");
         Assert.Equal(expectedPeriods, portalClient.KpiCalls.Count(call => call.MeterId == "meter-id-1"));
         Assert.Equal(expectedPeriods, portalClient.KpiCalls.Count(call => call.MeterId == "meter-point-2"));
 
@@ -85,12 +87,12 @@ public sealed class EdaSyncOrchestratorTests
             CancellationToken cancellationToken)
             => Task.FromResult<EdaConsumptionSuryaData?>(null);
 
-        public Task<IReadOnlyList<EdaConsumptionSuryaPoint>> FetchConsumptionSuryaPointsAsync(
+        public Task<EdaConsumptionSuryaCombinedData> FetchConsumptionSuryaPointsAsync(
             string communityId,
             string meterId,
             EdaPeriodDefinition period,
             CancellationToken cancellationToken)
-            => Task.FromResult<IReadOnlyList<EdaConsumptionSuryaPoint>>([]);
+            => Task.FromResult(new EdaConsumptionSuryaCombinedData([], null, null, null, null, null));
     }
 
     private sealed class FakePublisher : IEdaResultPublisher

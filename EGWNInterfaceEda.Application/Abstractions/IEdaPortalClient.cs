@@ -15,7 +15,7 @@ public interface IEdaPortalClient
         EdaConsumptionSuryaRoute route,
         CancellationToken cancellationToken);
 
-    Task<IReadOnlyList<EdaConsumptionSuryaPoint>> FetchConsumptionSuryaPointsAsync(
+    Task<EdaConsumptionSuryaCombinedData> FetchConsumptionSuryaPointsAsync(
         string communityId,
         string meterId,
         EdaPeriodDefinition period,

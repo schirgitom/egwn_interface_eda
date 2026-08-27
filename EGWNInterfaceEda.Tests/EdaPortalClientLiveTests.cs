@@ -78,8 +78,9 @@ public sealed class EdaPortalClientLiveTests
         var meterId = GetRequiredMeterId(options);
 
         var now = DateTimeOffset.Now;
-        var from = new DateTimeOffset(now.Date.AddDays(-30), now.Offset);
-        var to = new DateTimeOffset(now.Date.AddDays(-1).AddHours(23).AddMinutes(45), now.Offset);
+        var monthStart = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Unspecified);
+        var from = new DateTimeOffset(monthStart, now.Offset);
+        var to = new DateTimeOffset(monthStart.AddMonths(1).AddDays(-1).AddHours(23).AddMinutes(59), now.Offset);
         var period = new EdaPeriodDefinition("integration", from, to, "day");
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
@@ -96,6 +97,72 @@ public sealed class EdaPortalClientLiveTests
 
     [Fact]
     [Trait("Category", "Integration")]
+    public async Task FetchConsumptionSuryaPointsAsync_hourly_combines_live_p_and_g_endpoints_with_time_window()
+    {
+        var options = BuildOptions();
+        using var client = CreateHttpClient(options);
+        var sut = CreateSut(client, options);
+        var meterId = GetRequiredMeterId(options);
+
+        var nowUtc = DateTimeOffset.UtcNow;
+        var from = new DateTimeOffset(new DateTime(nowUtc.Year, nowUtc.Month, 1, 0, 0, 0, DateTimeKind.Utc), TimeSpan.Zero);
+        var to = new DateTimeOffset(from.Date.AddMonths(1).AddDays(-1).AddHours(23).AddMinutes(59), TimeSpan.Zero);
+        var period = new EdaPeriodDefinition("integration-hourly", from, to, "hour");
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+        var pData = await sut.FetchConsumptionSuryaAsync(options.CommunityId, meterId, period, EdaConsumptionSuryaRoute.P, cts.Token);
+        var gData = await sut.FetchConsumptionSuryaAsync(options.CommunityId, meterId, period, EdaConsumptionSuryaRoute.G, cts.Token);
+        var combinedPoints = await sut.FetchConsumptionSuryaPointsAsync(options.CommunityId, meterId, period, cts.Token);
+
+        Assert.NotNull(pData);
+        Assert.NotNull(gData);
+        Assert.Equal("hour", pData.ScaleX);
+        Assert.Equal("hour", gData.ScaleX);
+        Assert.NotEmpty(pData.Series);
+        Assert.NotEmpty(gData.Series);
+        Assert.NotEmpty(combinedPoints.Points);
+
+        foreach (var point in combinedPoints.Points)
+        {
+            Assert.NotEqual(default, point.Timestamp);
+            Assert.True(point.Timestamp >= from && point.Timestamp <= to, $"Timestamp {point.Timestamp} should be within {from} and {to}.");
+        }
+
+        var pByTimestamp = pData.Series.ToDictionary(point => point.Timestamp, point => point.Value);
+        var gByTimestamp = gData.Series.ToDictionary(point => point.Timestamp, point => point.Value);
+        foreach (var combined in combinedPoints.Points)
+        {
+            if (gByTimestamp.TryGetValue(combined.Timestamp, out var totalConsumptionValue))
+            {
+                Assert.Equal(totalConsumptionValue, combined.TotalConsumptionValue);
+            }
+            else
+            {
+                Assert.Null(combined.TotalConsumptionValue);
+            }
+
+            if (pByTimestamp.TryGetValue(combined.Timestamp, out var gridShareValue))
+            {
+                Assert.Equal(gridShareValue, combined.GridShareValue);
+            }
+            else
+            {
+                Assert.Null(combined.GridShareValue);
+            }
+
+            if (combined.TotalConsumptionValue.HasValue && combined.GridShareValue.HasValue)
+            {
+                Assert.Equal(combined.TotalConsumptionValue.Value - combined.GridShareValue.Value, combined.CommunityShareValue);
+            }
+            else
+            {
+                Assert.Null(combined.CommunityShareValue);
+            }
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
     public async Task FetchConsumptionSuryaPointsAsync_combines_live_g_and_p_with_difference()
     {
         var options = BuildOptions();
@@ -104,8 +171,9 @@ public sealed class EdaPortalClientLiveTests
         var meterId = GetRequiredMeterId(options);
 
         var now = DateTimeOffset.Now;
-        var from = new DateTimeOffset(now.Date.AddDays(-30), now.Offset);
-        var to = new DateTimeOffset(now.Date.AddDays(-1).AddHours(23).AddMinutes(45), now.Offset);
+        var monthStart = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Unspecified);
+        var from = new DateTimeOffset(monthStart, now.Offset);
+        var to = new DateTimeOffset(monthStart.AddMonths(1).AddDays(-1).AddHours(23).AddMinutes(59), now.Offset);
         var period = new EdaPeriodDefinition("integration", from, to, "day");
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
@@ -113,38 +181,43 @@ public sealed class EdaPortalClientLiveTests
         var gData = await sut.FetchConsumptionSuryaAsync(options.CommunityId, meterId, period, EdaConsumptionSuryaRoute.G, cts.Token);
         var combinedPoints = await sut.FetchConsumptionSuryaPointsAsync(options.CommunityId, meterId, period, cts.Token);
 
-        Assert.NotEmpty(combinedPoints);
+        Assert.NotEmpty(combinedPoints.Points);
+        Assert.True(combinedPoints.TotalConsumption.HasValue && combinedPoints.TotalConsumption.Value > 0m);
+        Assert.True(combinedPoints.GridShareTotal.HasValue && combinedPoints.GridShareTotal.Value > 0m);
+        Assert.True(combinedPoints.CommunityShareTotal.HasValue && combinedPoints.CommunityShareTotal.Value > 0m);
+        Assert.True(combinedPoints.GridSharePercentage.HasValue && combinedPoints.GridSharePercentage.Value >= 0m);
+        Assert.True(combinedPoints.CommunitySharePercentage.HasValue && combinedPoints.CommunitySharePercentage.Value >= 0m);
 
         var pByTimestamp = pData.Series.ToDictionary(point => point.Timestamp, point => point.Value);
         var gByTimestamp = gData.Series.ToDictionary(point => point.Timestamp, point => point.Value);
 
-        foreach (var combined in combinedPoints)
+        foreach (var combined in combinedPoints.Points)
         {
-            if (gByTimestamp.TryGetValue(combined.Timestamp, out var gValue))
+            if (gByTimestamp.TryGetValue(combined.Timestamp, out var totalConsumptionValue))
             {
-                Assert.Equal(gValue, combined.GValue);
+                Assert.Equal(totalConsumptionValue, combined.TotalConsumptionValue);
             }
             else
             {
-                Assert.Null(combined.GValue);
+                Assert.Null(combined.TotalConsumptionValue);
             }
 
-            if (pByTimestamp.TryGetValue(combined.Timestamp, out var pValue))
+            if (pByTimestamp.TryGetValue(combined.Timestamp, out var gridShareValue))
             {
-                Assert.Equal(pValue, combined.PValue);
+                Assert.Equal(gridShareValue, combined.GridShareValue);
             }
             else
             {
-                Assert.Null(combined.PValue);
+                Assert.Null(combined.GridShareValue);
             }
 
-            if (combined.GValue.HasValue && combined.PValue.HasValue)
+            if (combined.TotalConsumptionValue.HasValue && combined.GridShareValue.HasValue)
             {
-                Assert.Equal(combined.GValue.Value - combined.PValue.Value, combined.Difference);
+                Assert.Equal(combined.TotalConsumptionValue.Value - combined.GridShareValue.Value, combined.CommunityShareValue);
             }
             else
             {
-                Assert.Null(combined.Difference);
+                Assert.Null(combined.CommunityShareValue);
             }
         }
     }

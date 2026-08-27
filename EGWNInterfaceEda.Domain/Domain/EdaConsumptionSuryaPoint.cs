@@ -2,6 +2,6 @@ namespace EGWNInterfaceEda.Domain;
 
 public sealed record EdaConsumptionSuryaPoint(
     DateTimeOffset? Timestamp,
-    decimal? GValue,
-    decimal? PValue,
-    decimal? Difference);
+    decimal? TotalConsumptionValue,
+    decimal? GridShareValue,
+    decimal? CommunityShareValue);

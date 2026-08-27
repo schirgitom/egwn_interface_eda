@@ -89,7 +89,7 @@ public sealed class EdaPortalClient(HttpClient httpClient, IOptions<EdaOptions> 
         return MapConsumptionSurya(envelope);
     }
 
-    public async Task<IReadOnlyList<EdaConsumptionSuryaPoint>> FetchConsumptionSuryaPointsAsync(
+    public async Task<EdaConsumptionSuryaCombinedData> FetchConsumptionSuryaPointsAsync(
         string communityId,
         string meterId,
         EdaPeriodDefinition period,
@@ -219,7 +219,7 @@ public sealed class EdaPortalClient(HttpClient httpClient, IOptions<EdaOptions> 
         return new EdaConsumptionSuryaData(points, envelope.Meta?.ScaleX, []);
     }
 
-    private static IReadOnlyList<EdaConsumptionSuryaPoint> MergeConsumptionSurya(EdaConsumptionSuryaData? g, EdaConsumptionSuryaData? p)
+    private static EdaConsumptionSuryaCombinedData MergeConsumptionSurya(EdaConsumptionSuryaData? g, EdaConsumptionSuryaData? p)
     {
         var series = new Dictionary<DateTimeOffset, (decimal? G, decimal? P)>();
 
@@ -255,17 +255,31 @@ public sealed class EdaPortalClient(HttpClient httpClient, IOptions<EdaOptions> 
             }
         }
 
-        return series
+        var totalConsumption = series.Values.Where(entry => entry.G.HasValue).Sum(entry => entry.G!.Value);
+        var totalGridShare = series.Values.Where(entry => entry.P.HasValue).Sum(entry => entry.P!.Value);
+        var totalCommunityShare = totalConsumption - totalGridShare;
+
+        var points = series
             .OrderBy(entry => entry.Key)
             .Select(entry =>
             {
-                var difference = entry.Value.G.HasValue && entry.Value.P.HasValue
-                    ? (decimal?)(entry.Value.G.Value - entry.Value.P.Value)
+                var totalConsumptionValue = entry.Value.G;
+                var gridShareValue = entry.Value.P;
+                var communityShareValue = totalConsumptionValue.HasValue && gridShareValue.HasValue
+                    ? (decimal?)(totalConsumptionValue.Value - gridShareValue.Value)
                     : null;
 
-                return new EdaConsumptionSuryaPoint(entry.Key, entry.Value.G, entry.Value.P, difference);
+                return new EdaConsumptionSuryaPoint(entry.Key, totalConsumptionValue, gridShareValue, communityShareValue);
             })
             .ToArray();
+
+        return new EdaConsumptionSuryaCombinedData(
+            points,
+            totalConsumption,
+            totalGridShare,
+            totalCommunityShare,
+            totalConsumption > 0m ? totalGridShare / totalConsumption * 100m : 0m,
+            totalConsumption > 0m ? totalCommunityShare / totalConsumption * 100m : 0m);
     }
 
     private static IReadOnlyList<EdaSeriesPoint> MapSeries(IReadOnlyList<EdaSeriesPointDto>? series)

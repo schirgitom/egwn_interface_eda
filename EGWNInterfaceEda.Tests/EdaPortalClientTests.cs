@@ -34,7 +34,7 @@ public sealed class EdaPortalClientTests
 
             if (request.RequestUri.AbsoluteUri.Equals(options.LoginUrl, StringComparison.OrdinalIgnoreCase))
             {
-                return JsonResponse("""{ "token": "token-value", "exp": "2026-07-05T12:19:53Z" }""");
+                return JsonResponse("""{ "token": "token-value", "exp": "2099-07-05T12:19:53Z" }""");
             }
 
             if (request.RequestUri.AbsolutePath.EndsWith($"/consumptionsurya/p/{meterId}", StringComparison.OrdinalIgnoreCase))
@@ -89,7 +89,7 @@ public sealed class EdaPortalClientTests
 
             if (request.RequestUri.AbsoluteUri.Equals(options.LoginUrl, StringComparison.OrdinalIgnoreCase))
             {
-                return JsonResponse("""{ "token": "token-value", "exp": "2026-07-05T12:19:53Z" }""");
+                return JsonResponse("""{ "token": "token-value", "exp": "2099-07-05T12:19:53Z" }""");
             }
 
             if (request.RequestUri.AbsolutePath.EndsWith($"/consumptionsurya/g/{meterId}", StringComparison.OrdinalIgnoreCase))
@@ -158,7 +158,7 @@ public sealed class EdaPortalClientTests
                 return JsonResponse("""
                     {
                       "token": "token-value",
-                      "exp": "2026-07-05T12:19:53Z"
+                      "exp": "2099-07-05T12:19:53Z"
                     }
                     """);
             }
@@ -338,10 +338,15 @@ public sealed class EdaPortalClientTests
         Assert.Null(consumptionG.Series[0].Methods);
         Assert.Empty(consumptionG.Points);
 
-        var comparisonPoint = Assert.Single(consumptionPoints, point => point.Timestamp == new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero));
-        Assert.Equal(120.5m, comparisonPoint.GValue);
-        Assert.Equal(20.6658m, comparisonPoint.PValue);
-        Assert.Equal(99.8342m, comparisonPoint.Difference);
+        var comparisonPoint = Assert.Single(consumptionPoints.Points, point => point.Timestamp == new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero));
+        Assert.Equal(120.5m, comparisonPoint.TotalConsumptionValue);
+        Assert.Equal(20.6658m, comparisonPoint.GridShareValue);
+        Assert.Equal(99.8342m, comparisonPoint.CommunityShareValue);
+        Assert.Equal(218.9m, consumptionPoints.TotalConsumption);
+        Assert.Equal(79.1182m, consumptionPoints.GridShareTotal);
+        Assert.Equal(139.7818m, consumptionPoints.CommunityShareTotal);
+        Assert.True(consumptionPoints.GridSharePercentage > 0m);
+        Assert.True(consumptionPoints.CommunitySharePercentage > 0m);
 
         Assert.Single(capturedRequests, request => request.Uri.AbsoluteUri.Equals(options.LoginUrl, StringComparison.OrdinalIgnoreCase));
     }
