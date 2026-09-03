@@ -7,9 +7,15 @@ using EGWNInterfaceEda.Infrastructure.Services;
 using Quartz;
 using Serilog;
 using Microsoft.Extensions.Options;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using AppQuartzOptions = EGWNInterfaceEda.Application.Options.QuartzOptions;
 
-var builder = Host.CreateApplicationBuilder(args);
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddControllers();
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
 
 builder.Services.AddOptions<CentralApiOptions>()
     .BindConfiguration(CentralApiOptions.SectionName)
@@ -55,22 +61,20 @@ builder.Services.AddHttpClient<IEdaPortalClient, EdaPortalClient>((sp, client) =
 });
 
 builder.Services.AddSingleton<IEdaResultPublisher, RabbitMqEdaResultPublisher>();
-builder.Services.AddSingleton<IEdaSyncOrchestrator, EdaSyncOrchestrator>();
+builder.Services.AddSingleton<IEdaTriggerPublisher, RabbitMqEdaResultPublisher>();
+builder.Services.AddSingleton<IEdaReadingOrchestrator, EdaReadingOrchestrator>();
 builder.Services.AddSingleton<IClock, SystemClock>();
 builder.Services.AddHostedService<ConsulRegistrationHostedService>();
 
 builder.Services.AddQuartz(q =>
 {
-    var jobKey = new JobKey(EdaSyncJob.JobName, EdaSyncJob.GroupName);
-    q.AddJob<EdaSyncJob>(opts => opts.WithIdentity(jobKey));
+    var meterJobKey = new JobKey(EdaTriggerMeterReadingJob.JobName, EdaTriggerMeterReadingJob.GroupName);
+    q.AddJob<EdaTriggerMeterReadingJob>(opts => opts.WithIdentity(meterJobKey));
+    q.AddTrigger(opts => opts.ForJob(meterJobKey).WithIdentity($"{EdaTriggerMeterReadingJob.JobName}.trigger", EdaTriggerMeterReadingJob.GroupName).StartNow().WithSimpleSchedule(schedule => schedule.WithInterval(TimeSpan.FromMinutes(quartzOptions.IntervalMinutes)).RepeatForever()));
 
-    q.AddTrigger(opts => opts
-        .ForJob(jobKey)
-        .WithIdentity($"{EdaSyncJob.JobName}.trigger", EdaSyncJob.GroupName)
-        .StartNow()
-        .WithSimpleSchedule(schedule => schedule
-            .WithInterval(TimeSpan.FromMinutes(quartzOptions.IntervalMinutes))
-            .RepeatForever()));
+    var kpiJobKey = new JobKey(EdaTriggerKpiReadingJob.JobName, EdaTriggerKpiReadingJob.GroupName);
+    q.AddJob<EdaTriggerKpiReadingJob>(opts => opts.WithIdentity(kpiJobKey));
+    q.AddTrigger(opts => opts.ForJob(kpiJobKey).WithIdentity($"{EdaTriggerKpiReadingJob.JobName}.trigger", EdaTriggerKpiReadingJob.GroupName).StartNow().WithSimpleSchedule(schedule => schedule.WithInterval(TimeSpan.FromMinutes(5)).RepeatForever()));
 });
 
 builder.Services.AddQuartzHostedService(options => options.WaitForJobsToComplete = true);
@@ -92,4 +96,7 @@ builder.Services.AddSerilog((services, loggerConfiguration) =>
 });
 
 var app = builder.Build();
+app.UseSwagger();
+app.UseSwaggerUI();
+app.MapControllers();
 await app.RunAsync();

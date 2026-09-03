@@ -41,9 +41,7 @@ public sealed class EdaSyncOrchestrator(
                 var meter = await edaPortalClient.FetchMeterDataAsync(customerGroup.Key, period, cancellationToken);
                 foreach (var customer in customerGroup)
                 {
-                    var meterId = ResolveMeterId(customer);
-                    var kpi = await edaPortalClient.FetchKpiAsync(customerGroup.Key, meterId, period, cancellationToken);
-                    var snapshot = new EdaPeriodSnapshot(period, kpi, meter, clock.UtcNow);
+                    var snapshot = new EdaPeriodSnapshot(period, null, meter, clock.UtcNow);
                     var publication = new EdaSyncPublication(customer, customerGroup.Key, snapshot, clock.UtcNow);
                     await publisher.PublishAsync(publication, cancellationToken);
                 }

@@ -2,46 +2,24 @@ namespace EGWNInterfaceEda.Domain;
 
 public sealed record EdaPeriodDefinition(string Key, DateTimeOffset From, DateTimeOffset To, string GroupBy)
 {
+    public const int DefaultHistoricalDays = 21;
+
     public static IReadOnlyList<EdaPeriodDefinition> CreateAll(DateTimeOffset now, DateOnly? customFrom, DateOnly? customTo)
     {
-        var today = StartOfDay(now.Date, now.Offset);
-        var yesterday = StartOfDay(now.Date.AddDays(-1), now.Offset);
-        var weekStart = StartOfWeek(now.Date, now.Offset);
-        var prevWeekStart = weekStart.AddDays(-7);
-        var monthStart = StartOfDay(new DateTime(now.Year, now.Month, 1), now.Offset);
-        var nextMonthStart = monthStart.AddMonths(1);
-        var prevMonthStart = monthStart.AddMonths(-1);
-        var yearStart = StartOfDay(new DateTime(now.Year, 1, 1), now.Offset);
-        var nextYearStart = yearStart.AddYears(1);
-        var prevYearStart = yearStart.AddYears(-1);
+        if (customFrom.HasValue || customTo.HasValue)
+        {
+            var customStartDate = customFrom ?? customTo ?? DateOnly.FromDateTime(now.DateTime);
+            var customEndDate = customTo ?? customFrom ?? DateOnly.FromDateTime(now.DateTime);
+            var customStart = StartOfDay(customStartDate.ToDateTime(TimeOnly.MinValue), now.Offset);
+            var customEnd = EndOfDay(customEndDate.ToDateTime(TimeOnly.MinValue), now.Offset);
+            return [new("custom-stündlich", customStart, customEnd, "hour")];
+        }
 
-        var customFromDate = customFrom ?? DateOnly.FromDateTime(now.DateTime);
-        var customToDate = customTo ?? customFromDate;
+        var from = now.AddDays(-DefaultHistoricalDays);
+        var start = StartOfDay(from.Date, now.Offset);
+        var end = EndOfDay(now.Date, now.Offset);
 
-        var customStart = StartOfDay(customFromDate.ToDateTime(TimeOnly.MinValue), now.Offset);
-        var customEnd = EndOfDay(StartOfDay(customToDate.ToDateTime(TimeOnly.MinValue), now.Offset).AddHours(23).AddMinutes(45), now.Offset);
-
-        return
-        [
-            new("heute", today, EndOfDay(today, now.Offset), "day"),
-            new("heute-stündlich", today, EndOfDay(today, now.Offset), "hour"),
-            new("gestern", yesterday, EndOfDay(yesterday, now.Offset), "day"),
-            new("gestern-stündlich", yesterday, EndOfDay(yesterday, now.Offset), "hour"),
-            new("woche", weekStart, EndOfDay(weekStart.AddDays(6), now.Offset), "day"),
-            new("vorwoche", prevWeekStart, EndOfDay(prevWeekStart.AddDays(6), now.Offset), "day"),
-            new("monat", monthStart, EndOfDay(nextMonthStart.AddDays(-1), now.Offset), "month"),
-            new("vormonat", prevMonthStart, EndOfDay(monthStart.AddDays(-1), now.Offset), "month"),
-            new("jahr", yearStart, EndOfDay(nextYearStart.AddDays(-1), now.Offset), "year"),
-            new("vorjahr", prevYearStart, EndOfDay(yearStart.AddDays(-1), now.Offset), "year"),
-            new("custom", customStart, customEnd, "month"),
-            new("custom-stündlich", customStart, customEnd, "hour"),
-        ];
-    }
-
-    private static DateTimeOffset StartOfWeek(DateTime date, TimeSpan offset)
-    {
-        var dayOfWeek = date.DayOfWeek == DayOfWeek.Sunday ? 7 : (int)date.DayOfWeek;
-        return StartOfDay(date.AddDays(-(dayOfWeek - 1)), offset);
+        return [new($"letzte-{DefaultHistoricalDays}-tage-stündlich", start, end, "hour")];
     }
 
     private static DateTimeOffset StartOfDay(DateTime date, TimeSpan offset) =>

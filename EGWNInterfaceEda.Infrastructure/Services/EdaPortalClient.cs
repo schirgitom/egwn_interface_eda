@@ -20,12 +20,11 @@ public sealed class EdaPortalClient(HttpClient httpClient, IOptions<EdaOptions> 
     private string? _token;
     private DateTimeOffset? _tokenExpiryUtc;
 
-    public async Task<EdaKpiData?> FetchKpiAsync(string communityId, string meterId, EdaPeriodDefinition period, CancellationToken cancellationToken)
+    public async Task<EdaKpiData?> FetchKpiAsync(string communityId, EdaPeriodDefinition period, CancellationToken cancellationToken)
     {
         var body = new
         {
             energyCommunityId = communityId,
-            meterId,
             groupBy = period.GroupBy,
             time = new
             {

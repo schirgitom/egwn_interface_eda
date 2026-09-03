@@ -44,7 +44,7 @@ public sealed class EdaPortalClientLiveTests
         var meterId = options.MeterId ?? options.CommunityId;
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
-        var kpi = await sut.FetchKpiAsync(options.CommunityId, meterId, period, cts.Token);
+        var kpi = await sut.FetchKpiAsync(DateTimeOffset.UtcNow, meterId, cts.Token);
 
         Assert.NotNull(kpi);
     }

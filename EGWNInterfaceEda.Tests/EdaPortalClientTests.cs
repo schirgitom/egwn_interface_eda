@@ -266,7 +266,7 @@ public sealed class EdaPortalClientTests
             new DateTimeOffset(2026, 6, 27, 23, 45, 0, TimeSpan.Zero),
             "day");
 
-        var kpi = await sut.FetchKpiAsync(options.CommunityId, "meter-007", period, CancellationToken.None);
+        var kpi = await sut.FetchKpiAsync(new DateTimeOffset(2026, 6, 27, 23, 45, 0, TimeSpan.Zero), "meter-007", CancellationToken.None);
         var meter = await sut.FetchMeterDataAsync(options.CommunityId, period, CancellationToken.None);
         var consumptionP = await sut.FetchConsumptionSuryaAsync(options.CommunityId, "meter-007", period, EdaConsumptionSuryaRoute.P, CancellationToken.None);
         var consumptionG = await sut.FetchConsumptionSuryaAsync(options.CommunityId, "meter-007", period, EdaConsumptionSuryaRoute.G, CancellationToken.None);
@@ -293,7 +293,7 @@ public sealed class EdaPortalClientTests
         Assert.Null(lastGenerationPoint.Methods);
 
         var kpiRequest = Assert.Single(capturedRequests, request =>
-            request.Uri.AbsolutePath.EndsWith($"/pwa/energycommunities/{options.CommunityId}/kpiData", StringComparison.OrdinalIgnoreCase));
+            request.Uri.AbsolutePath.EndsWith("/pwa/kpiData", StringComparison.OrdinalIgnoreCase));
         var meterRequest = Assert.Single(capturedRequests, request =>
             request.Uri.AbsolutePath.EndsWith($"/pwa/energycommunities/{options.CommunityId}/meterdata", StringComparison.OrdinalIgnoreCase));
         var consumptionPRequests = capturedRequests
@@ -318,7 +318,7 @@ public sealed class EdaPortalClientTests
             Assert.Equal("token-value", request.Authorization.Parameter);
         });
 
-        AssertPayload(kpiRequest.Body!, options.CommunityId, meterId: "meter-007", includeMeterIdProperty: true);
+        AssertPayload(kpiRequest.Body!, options.CommunityId, meterId: "meter-007", includeMeterIdProperty: true, expectTimeOnly: true);
         AssertPayload(meterRequest.Body!, options.CommunityId, meterId: null, includeMeterIdProperty: false);
         AssertPayload(consumptionPRequest.Body!, options.CommunityId, meterId: "meter-007", includeMeterIdProperty: false, meterName: "meter-007");
         AssertPayload(consumptionGRequest.Body!, options.CommunityId, meterId: "meter-007", includeMeterIdProperty: false, meterName: "meter-007");
@@ -356,9 +356,17 @@ public sealed class EdaPortalClientTests
         string expectedCommunityId,
         string? meterId,
         bool includeMeterIdProperty,
+        bool expectTimeOnly = false,
         string? meterName = null)
     {
         var payload = JsonDocument.Parse(body);
+        if (expectTimeOnly)
+        {
+            Assert.Equal(meterId, payload.RootElement.GetProperty("meterId").GetString());
+            Assert.Equal("2026-06-27T23:45", payload.RootElement.GetProperty("time").GetString());
+            return;
+        }
+
         Assert.Equal(expectedCommunityId, payload.RootElement.GetProperty("energyCommunityId").GetString());
         Assert.Equal("day", payload.RootElement.GetProperty("groupBy").GetString());
 

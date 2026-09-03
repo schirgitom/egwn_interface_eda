@@ -19,4 +19,8 @@ public sealed class RabbitMqOptions
     public string ExchangeType { get; set; } = "topic";
 
     public string RoutingKey { get; set; } = "eda.sync.result";
+
+    public string QueueName { get; set; } = "egwn.measurements";
+
+    public int? MessageTtlMilliseconds { get; set; }
 }

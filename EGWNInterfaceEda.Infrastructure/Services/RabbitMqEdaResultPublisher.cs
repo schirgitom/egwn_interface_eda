@@ -6,10 +6,11 @@ using EGWNInterfaceEda.Application.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
+using RabbitMQ.Client.Exceptions;
 
 namespace EGWNInterfaceEda.Infrastructure.Services;
 
-public sealed class RabbitMqEdaResultPublisher : IEdaResultPublisher, IDisposable
+public sealed class RabbitMqEdaResultPublisher : IEdaResultPublisher, IEdaTriggerPublisher, IDisposable
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
     private readonly RabbitMqOptions _options;
@@ -26,19 +27,47 @@ public sealed class RabbitMqEdaResultPublisher : IEdaResultPublisher, IDisposabl
 
     public Task PublishAsync(EdaSyncPublication publication, CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
+        return PublishInternalAsync(publication, cancellationToken);
+    }
 
-        var channel = EnsureChannel();
-        var payload = JsonSerializer.Serialize(publication, SerializerOptions);
-        var body = Encoding.UTF8.GetBytes(payload);
+    public Task PublishAsync(EdaKpiSyncPublication publication, CancellationToken cancellationToken)
+    {
+        return PublishInternalAsync(publication, cancellationToken);
+    }
 
-        var properties = channel.CreateBasicProperties();
-        properties.Persistent = true;
-        properties.ContentType = "application/json";
-        properties.MessageId = Guid.NewGuid().ToString("N");
-        properties.Timestamp = new AmqpTimestamp(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+    public Task PublishMeterReadingsAsync(EdaMeterReadingsPublication publication, CancellationToken cancellationToken) =>
+        PublishInternalAsync(publication, cancellationToken);
 
-        channel.BasicPublish(_options.Exchange, _options.RoutingKey, properties, body);
+    public Task PublishKpiReadingsAsync(EdaKpiReadingsPublication publication, CancellationToken cancellationToken) =>
+        PublishInternalAsync(publication, cancellationToken);
+
+    private Task PublishInternalAsync<T>(T publication, CancellationToken cancellationToken)
+    {
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var channel = EnsureChannel();
+            var payload = JsonSerializer.Serialize(publication, SerializerOptions);
+            var body = Encoding.UTF8.GetBytes(payload);
+
+            var properties = channel.CreateBasicProperties();
+            properties.Persistent = true;
+            properties.ContentType = "application/json";
+            properties.MessageId = Guid.NewGuid().ToString("N");
+            properties.Timestamp = new AmqpTimestamp(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            if (_options.MessageTtlMilliseconds is > 0)
+            {
+                properties.Expiration = _options.MessageTtlMilliseconds.Value.ToString();
+            }
+
+            channel.BasicPublish(_options.Exchange, _options.RoutingKey, properties, body);
+        }
+        catch (Exception ex) when (ex is BrokerUnreachableException or AuthenticationFailureException or IOException or OperationInterruptedException)
+        {
+            _logger.LogError(ex, "Skipping RabbitMQ publish because the broker is unreachable");
+        }
+
         return Task.CompletedTask;
     }
 

@@ -10,6 +10,20 @@ namespace EGWNInterfaceEda.Tests;
 public sealed class EdaSyncOrchestratorTests
 {
     [Fact]
+    public void CreateAll_uses_one_hourly_window_for_the_last_three_weeks_by_default()
+    {
+        var fixedNow = new DateTimeOffset(2026, 6, 28, 12, 0, 0, TimeSpan.Zero);
+
+        var periods = EdaPeriodDefinition.CreateAll(fixedNow, null, null);
+
+        var period = Assert.Single(periods);
+        Assert.Equal("letzte-21-tage-stündlich", period.Key);
+        Assert.Equal("hour", period.GroupBy);
+        Assert.Equal(new DateTimeOffset(2026, 6, 7, 0, 0, 0, TimeSpan.Zero), period.From);
+        Assert.Equal(new DateTimeOffset(2026, 6, 28, 23, 45, 0, TimeSpan.Zero), period.To);
+    }
+
+    [Fact]
     public async Task RunAsync_fetches_meter_once_per_period_and_kpi_per_meter_id()
     {
         var fixedNow = new DateTimeOffset(2026, 6, 28, 12, 0, 0, TimeSpan.Zero);
@@ -53,6 +67,8 @@ public sealed class EdaSyncOrchestratorTests
         {
             Assert.NotNull(publication.Snapshot.Meter);
             Assert.NotNull(publication.Snapshot.Kpi);
+            Assert.False(string.IsNullOrWhiteSpace(publication.MeterPointNumber));
+            Assert.Equal(publication.Customer.MeterPointNumber, publication.MeterPointNumber);
         });
     }
 
@@ -67,9 +83,9 @@ public sealed class EdaSyncOrchestratorTests
         public List<(string CommunityId, EdaPeriodDefinition Period)> MeterCalls { get; } = [];
         public List<(string CommunityId, string MeterId, EdaPeriodDefinition Period)> KpiCalls { get; } = [];
 
-        public Task<EdaKpiData?> FetchKpiAsync(string communityId, string meterId, EdaPeriodDefinition period, CancellationToken cancellationToken)
+        public Task<EdaKpiData?> FetchKpiAsync(DateTimeOffset timestamp, string meterId, CancellationToken cancellationToken)
         {
-            KpiCalls.Add((communityId, meterId, period));
+            KpiCalls.Add(("community-1", meterId, new EdaPeriodDefinition("kpi", timestamp, timestamp, "hour")));
             return Task.FromResult<EdaKpiData?>(new EdaKpiData(1m, 2m, 3m, 4m, 5m));
         }
 
@@ -104,6 +120,9 @@ public sealed class EdaSyncOrchestratorTests
             Publications.Add(publication);
             return Task.CompletedTask;
         }
+
+        public Task PublishAsync(EdaKpiSyncPublication publication, CancellationToken cancellationToken) =>
+            Task.CompletedTask;
     }
 
     private sealed class FakeClock(DateTimeOffset now) : IClock
