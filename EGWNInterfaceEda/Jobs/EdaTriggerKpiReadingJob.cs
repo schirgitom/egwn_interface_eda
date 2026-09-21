@@ -14,6 +14,7 @@ public sealed class EdaTriggerKpiReadingJob(IEdaReadingOrchestrator orchestrator
     {
         logger.LogInformation("KPI reading trigger started");
         await orchestrator.TriggerKpiReadingAsync(new EdaTriggerRequest(null, null, null), context.CancellationToken);
-        logger.LogInformation("KPI reading trigger completed");
+        var nextFire = context.NextFireTimeUtc?.ToLocalTime();
+        logger.LogInformation("KPI reading trigger completed. Next run: {NextFire}", nextFire?.ToString("yyyy-MM-dd HH:mm:ss zzz") ?? "unknown");
     }
 }

@@ -83,9 +83,9 @@ public sealed class EdaSyncOrchestratorTests
         public List<(string CommunityId, EdaPeriodDefinition Period)> MeterCalls { get; } = [];
         public List<(string CommunityId, string MeterId, EdaPeriodDefinition Period)> KpiCalls { get; } = [];
 
-        public Task<EdaKpiData?> FetchKpiAsync(DateTimeOffset timestamp, string meterId, CancellationToken cancellationToken)
+        public Task<EdaKpiData?> FetchKpiAsync(string communityId, EdaPeriodDefinition period, CancellationToken cancellationToken)
         {
-            KpiCalls.Add(("community-1", meterId, new EdaPeriodDefinition("kpi", timestamp, timestamp, "hour")));
+            KpiCalls.Add((communityId, "n/a", period));
             return Task.FromResult<EdaKpiData?>(new EdaKpiData(1m, 2m, 3m, 4m, 5m));
         }
 

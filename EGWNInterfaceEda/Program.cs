@@ -13,6 +13,23 @@ using Microsoft.Extensions.Hosting;
 using AppQuartzOptions = EGWNInterfaceEda.Application.Options.QuartzOptions;
 
 var builder = WebApplication.CreateBuilder(args);
+
+var consulUrl = Environment.GetEnvironmentVariable("CONSUL_URL")
+    ?? builder.Configuration["Consul:Address"];
+var consulKvPath = Environment.GetEnvironmentVariable("CONSUL_KV_PATH")
+    ?? builder.Configuration["Consul:Key"]
+    ?? builder.Configuration["Consul:KvPath"]
+    ?? "egwn-interface-eda/appsettings";
+
+if (!string.IsNullOrWhiteSpace(consulUrl))
+{
+    builder.Configuration.AddConsulKv(consulUrl, consulKvPath);
+    Console.WriteLine($"[Startup] Loading configuration from Consul: {consulUrl} → {consulKvPath}");
+}
+else
+{
+    Console.WriteLine("[Startup] No Consul URL configured – using appsettings only");
+}
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -79,23 +96,17 @@ builder.Services.AddQuartz(q =>
 
 builder.Services.AddQuartzHostedService(options => options.WaitForJobsToComplete = true);
 
-builder.Services.AddSerilog((services, loggerConfiguration) =>
+builder.Host.UseSerilog((ctx, loggerConfiguration) =>
 {
-    var configuration = services.GetRequiredService<IConfiguration>();
-    var seqOptions = configuration.GetSection(SeqOptions.SectionName).Get<SeqOptions>() ?? new SeqOptions();
-    loggerConfiguration
-        .ReadFrom.Configuration(configuration)
-        .ReadFrom.Services(services)
-        .Enrich.FromLogContext()
-        .WriteTo.Console();
-
-    if (!string.IsNullOrWhiteSpace(seqOptions.Url))
-    {
-        loggerConfiguration.WriteTo.Seq(seqOptions.Url, apiKey: seqOptions.ApiKey);
-    }
+    loggerConfiguration.ReadFrom.Configuration(ctx.Configuration);
 });
 
 var app = builder.Build();
+
+var rabbitOpts = app.Services.GetRequiredService<IOptions<RabbitMqOptions>>().Value;
+app.Logger.LogInformation("RabbitMQ config: Host={Host}, Port={Port}, User={User}, VHost={VHost}",
+    rabbitOpts.HostName, rabbitOpts.Port, rabbitOpts.UserName, rabbitOpts.VirtualHost);
+
 app.UseSwagger();
 app.UseSwaggerUI();
 app.MapControllers();

@@ -29,4 +29,8 @@ public sealed class ReadingsController(IEdaReadingOrchestrator orchestrator) : C
         [FromBody] EdaTriggerRequest request,
         CancellationToken cancellationToken) =>
         Ok(await orchestrator.TriggerKpiReadingAsync(request, cancellationToken));
+
+    [HttpPost("backfill")]
+    public async Task<ActionResult<EdaBackfillResponse>> TriggerHistoricalBackfill(CancellationToken cancellationToken) =>
+        Ok(await orchestrator.TriggerHistoricalBackfillAsync(cancellationToken));
 }

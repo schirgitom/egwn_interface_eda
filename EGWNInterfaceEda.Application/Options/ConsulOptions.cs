@@ -6,6 +6,8 @@ public sealed class ConsulOptions
 
     public string? Address { get; set; }
 
+    public string KvPath { get; set; } = "egwn-interface-eda/appsettings";
+
     public string ServiceName { get; set; } = "egwn-interface-eda";
 
     public string ServiceId { get; set; } = $"{Environment.MachineName}-egwn-interface-eda";

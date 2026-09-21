@@ -14,6 +14,7 @@ public sealed class EdaTriggerMeterReadingJob(IEdaReadingOrchestrator orchestrat
     {
         logger.LogInformation("Meter reading trigger started");
         await orchestrator.TriggerMeterReadingAsync(new EdaTriggerRequest(null, null, null), context.CancellationToken);
-        logger.LogInformation("Meter reading trigger completed");
+        var nextFire = context.NextFireTimeUtc?.ToLocalTime();
+        logger.LogInformation("Meter reading trigger completed. Next run: {NextFire}", nextFire?.ToString("yyyy-MM-dd HH:mm:ss zzz") ?? "unknown");
     }
 }

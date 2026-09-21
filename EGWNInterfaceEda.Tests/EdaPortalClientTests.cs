@@ -266,7 +266,7 @@ public sealed class EdaPortalClientTests
             new DateTimeOffset(2026, 6, 27, 23, 45, 0, TimeSpan.Zero),
             "day");
 
-        var kpi = await sut.FetchKpiAsync(new DateTimeOffset(2026, 6, 27, 23, 45, 0, TimeSpan.Zero), "meter-007", CancellationToken.None);
+        var kpi = await sut.FetchKpiAsync(options.CommunityId, period, CancellationToken.None);
         var meter = await sut.FetchMeterDataAsync(options.CommunityId, period, CancellationToken.None);
         var consumptionP = await sut.FetchConsumptionSuryaAsync(options.CommunityId, "meter-007", period, EdaConsumptionSuryaRoute.P, CancellationToken.None);
         var consumptionG = await sut.FetchConsumptionSuryaAsync(options.CommunityId, "meter-007", period, EdaConsumptionSuryaRoute.G, CancellationToken.None);

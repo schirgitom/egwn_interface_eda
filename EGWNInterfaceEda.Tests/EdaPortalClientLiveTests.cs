@@ -37,14 +37,14 @@ public sealed class EdaPortalClientLiveTests
         using var client = CreateHttpClient(options);
         var sut = CreateSut(client, options);
 
-        var now = DateTimeOffset.Now;
+        var now = DateTimeOffset.Now.AddDays(-7);
         var from = new DateTimeOffset(now.Date.AddDays(-1), now.Offset);
         var to = new DateTimeOffset(now.Date, now.Offset);
-        var period = new EdaPeriodDefinition("integration", from, to, "day");
+        var period = new EdaPeriodDefinition("integration", from, to, "hour");
         var meterId = options.MeterId ?? options.CommunityId;
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
-        var kpi = await sut.FetchKpiAsync(DateTimeOffset.UtcNow, meterId, cts.Token);
+        var kpi = await sut.FetchKpiAsync(options.CommunityId, period, cts.Token);
 
         Assert.NotNull(kpi);
     }
