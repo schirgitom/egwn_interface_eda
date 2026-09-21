@@ -4,6 +4,7 @@ using EGWNInterfaceEda.Application.Services;
 using EGWNInterfaceEda.Infrastructure.Hosting;
 using EGWNInterfaceEda.Jobs;
 using EGWNInterfaceEda.Infrastructure.Services;
+using Prometheus;
 using Quartz;
 using Serilog;
 using Microsoft.Extensions.Options;
@@ -81,7 +82,9 @@ builder.Services.AddSingleton<IEdaResultPublisher, RabbitMqEdaResultPublisher>()
 builder.Services.AddSingleton<IEdaTriggerPublisher, RabbitMqEdaResultPublisher>();
 builder.Services.AddSingleton<IEdaReadingOrchestrator, EdaReadingOrchestrator>();
 builder.Services.AddSingleton<IClock, SystemClock>();
+builder.Services.AddSingleton<IEdaMetrics, PrometheusEdaMetrics>();
 builder.Services.AddHostedService<ConsulRegistrationHostedService>();
+builder.Services.AddHostedService<QuartzScheduleMetricsHostedService>();
 
 builder.Services.AddQuartz(q =>
 {
@@ -91,7 +94,7 @@ builder.Services.AddQuartz(q =>
 
     var kpiJobKey = new JobKey(EdaTriggerKpiReadingJob.JobName, EdaTriggerKpiReadingJob.GroupName);
     q.AddJob<EdaTriggerKpiReadingJob>(opts => opts.WithIdentity(kpiJobKey));
-    q.AddTrigger(opts => opts.ForJob(kpiJobKey).WithIdentity($"{EdaTriggerKpiReadingJob.JobName}.trigger", EdaTriggerKpiReadingJob.GroupName).StartNow().WithSimpleSchedule(schedule => schedule.WithInterval(TimeSpan.FromMinutes(5)).RepeatForever()));
+    q.AddTrigger(opts => opts.ForJob(kpiJobKey).WithIdentity($"{EdaTriggerKpiReadingJob.JobName}.trigger", EdaTriggerKpiReadingJob.GroupName).StartNow().WithSimpleSchedule(schedule => schedule.WithInterval(TimeSpan.FromMinutes(quartzOptions.IntervalMinutes)).RepeatForever()));
 });
 
 builder.Services.AddQuartzHostedService(options => options.WaitForJobsToComplete = true);
@@ -109,5 +112,8 @@ app.Logger.LogInformation("RabbitMQ config: Host={Host}, Port={Port}, User={User
 
 app.UseSwagger();
 app.UseSwaggerUI();
+app.UseRouting();
+app.UseHttpMetrics();
 app.MapControllers();
+app.MapMetrics();
 await app.RunAsync();

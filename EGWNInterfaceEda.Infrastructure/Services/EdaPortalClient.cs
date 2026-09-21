@@ -103,29 +103,112 @@ public sealed class EdaPortalClient(HttpClient httpClient, IOptions<EdaOptions> 
 
     private async Task<T?> PostAsync<T>(string relativePath, object body, CancellationToken cancellationToken)
     {
-        var token = await GetTokenAsync(cancellationToken);
-        using var request = new HttpRequestMessage(HttpMethod.Post, relativePath)
+        for (var attempt = 1; ; attempt++)
         {
-            Content = JsonContent.Create(body, options: SerializerOptions)
-        };
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            var token = await GetTokenAsync(forceRefresh: attempt > 1, cancellationToken);
+            using var request = new HttpRequestMessage(HttpMethod.Post, relativePath)
+            {
+                Content = JsonContent.Create(body, options: SerializerOptions)
+            };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            request.Headers.Accept.ParseAdd("application/json");
 
-        using var response = await httpClient.SendAsync(request, cancellationToken);
-        response.EnsureSuccessStatusCode();
+            using var response = await httpClient.SendAsync(request, cancellationToken);
+            var raw = await response.Content.ReadAsStringAsync(cancellationToken);
+            var mediaType = response.Content.Headers.ContentType?.MediaType;
+            var looksLikeJson = raw.AsSpan().TrimStart() is var trimmed && trimmed.Length > 0 && (trimmed[0] == '{' || trimmed[0] == '[');
+            var isJsonResponse = (mediaType is null || mediaType.Contains("json", StringComparison.OrdinalIgnoreCase)) && (string.IsNullOrWhiteSpace(raw) || looksLikeJson);
 
-        var raw = await response.Content.ReadAsStringAsync(cancellationToken);
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            logger.LogWarning("EDA endpoint '{Path}' returned an empty response body", relativePath);
-            return default;
+            var authFailed = response.StatusCode == System.Net.HttpStatusCode.Unauthorized
+                             || response.StatusCode == System.Net.HttpStatusCode.Forbidden
+                             || (response.IsSuccessStatusCode && !isJsonResponse);
+
+            if (authFailed && attempt == 1)
+            {
+                logger.LogWarning(
+                    "EDA endpoint '{Path}' responded as unauthenticated (status {StatusCode}, content-type {ContentType}); refreshing token and retrying once",
+                    relativePath,
+                    (int)response.StatusCode,
+                    mediaType ?? "<none>");
+                InvalidateToken(token);
+                continue;
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                logger.LogError(
+                    "EDA endpoint '{Path}' returned {StatusCode}. Content-Type: {ContentType}. Body: {Body}",
+                    relativePath,
+                    (int)response.StatusCode,
+                    mediaType ?? "<none>",
+                    Truncate(raw, 1000));
+                response.EnsureSuccessStatusCode();
+            }
+
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                logger.LogWarning("EDA endpoint '{Path}' returned an empty response body", relativePath);
+                return default;
+            }
+
+            if (!isJsonResponse)
+            {
+                logger.LogError(
+                    "EDA endpoint '{Path}' did not return JSON. Status: {StatusCode}. Content-Type: {ContentType}. Body: {Body}",
+                    relativePath,
+                    (int)response.StatusCode,
+                    mediaType ?? "<none>",
+                    Truncate(raw, 1000));
+                throw new InvalidOperationException(
+                    $"EDA endpoint '{relativePath}' returned a non-JSON response (Content-Type: {mediaType ?? "<none>"}). See logs for details.");
+            }
+
+            try
+            {
+                return JsonSerializer.Deserialize<T>(raw, SerializerOptions);
+            }
+            catch (JsonException ex)
+            {
+                logger.LogError(
+                    ex,
+                    "Failed to deserialize response from EDA endpoint '{Path}'. Body: {Body}",
+                    relativePath,
+                    Truncate(raw, 1000));
+                throw;
+            }
         }
-
-        return JsonSerializer.Deserialize<T>(raw, SerializerOptions);
     }
 
-    private async Task<string> GetTokenAsync(CancellationToken cancellationToken)
+    private void InvalidateToken(string? expectedToken)
     {
-        if (_token is not null && _tokenExpiryUtc is not null && _tokenExpiryUtc - DateTimeOffset.UtcNow > TimeSpan.FromMinutes(5))
+        _tokenLock.Wait();
+        try
+        {
+            if (expectedToken is null || string.Equals(_token, expectedToken, StringComparison.Ordinal))
+            {
+                _token = null;
+                _tokenExpiryUtc = null;
+            }
+        }
+        finally
+        {
+            _tokenLock.Release();
+        }
+    }
+
+    private static string Truncate(string? value, int maxLength)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        return value.Length <= maxLength ? value : value[..maxLength] + "...";
+    }
+
+    private async Task<string> GetTokenAsync(bool forceRefresh, CancellationToken cancellationToken)
+    {
+        if (!forceRefresh && _token is not null && _tokenExpiryUtc is not null && _tokenExpiryUtc - DateTimeOffset.UtcNow > TimeSpan.FromMinutes(5))
         {
             return _token;
         }
@@ -133,7 +216,7 @@ public sealed class EdaPortalClient(HttpClient httpClient, IOptions<EdaOptions> 
         await _tokenLock.WaitAsync(cancellationToken);
         try
         {
-            if (_token is not null && _tokenExpiryUtc is not null && _tokenExpiryUtc - DateTimeOffset.UtcNow > TimeSpan.FromMinutes(5))
+            if (!forceRefresh && _token is not null && _tokenExpiryUtc is not null && _tokenExpiryUtc - DateTimeOffset.UtcNow > TimeSpan.FromMinutes(5))
             {
                 return _token;
             }

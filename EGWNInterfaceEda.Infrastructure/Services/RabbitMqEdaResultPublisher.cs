@@ -25,23 +25,19 @@ public sealed class RabbitMqEdaResultPublisher : IEdaResultPublisher, IEdaTrigge
         _logger = logger;
     }
 
-    public Task PublishAsync(EdaSyncPublication publication, CancellationToken cancellationToken)
-    {
-        return PublishInternalAsync(publication, cancellationToken);
-    }
+    public Task PublishAsync(EdaSyncPublication publication, CancellationToken cancellationToken) =>
+        PublishInternalAsync(publication, _options.Measurements.RoutingKey, cancellationToken);
 
-    public Task PublishAsync(EdaKpiSyncPublication publication, CancellationToken cancellationToken)
-    {
-        return PublishInternalAsync(publication, cancellationToken);
-    }
+    public Task PublishAsync(EdaKpiSyncPublication publication, CancellationToken cancellationToken) =>
+        PublishInternalAsync(publication, _options.Kpis.RoutingKey, cancellationToken);
 
     public Task PublishMeterReadingsAsync(EdaMeterReadingsPublication publication, CancellationToken cancellationToken) =>
-        PublishInternalAsync(publication, cancellationToken);
+        PublishInternalAsync(publication, _options.Measurements.RoutingKey, cancellationToken);
 
     public Task PublishKpiReadingsAsync(EdaKpiReadingsPublication publication, CancellationToken cancellationToken) =>
-        PublishInternalAsync(publication, cancellationToken);
+        PublishInternalAsync(publication, _options.Kpis.RoutingKey, cancellationToken);
 
-    private Task PublishInternalAsync<T>(T publication, CancellationToken cancellationToken)
+    private Task PublishInternalAsync<T>(T publication, string routingKey, CancellationToken cancellationToken)
     {
         try
         {
@@ -61,9 +57,9 @@ public sealed class RabbitMqEdaResultPublisher : IEdaResultPublisher, IEdaTrigge
                 properties.Expiration = _options.MessageTtlMilliseconds.Value.ToString();
             }
 
-            channel.BasicPublish(_options.Exchange, _options.RoutingKey, properties, body);
+            channel.BasicPublish(_options.Exchange, routingKey, properties, body);
             _logger.LogDebug("RabbitMQ published {Type} → exchange={Exchange}, routingKey={RoutingKey}, messageId={MessageId}, size={Size}B, payload={Payload}",
-                typeof(T).Name, _options.Exchange, _options.RoutingKey, properties.MessageId, body.Length, payload);
+                typeof(T).Name, _options.Exchange, routingKey, properties.MessageId, body.Length, payload);
         }
         catch (Exception ex) when (ex is BrokerUnreachableException or AuthenticationFailureException or IOException or OperationInterruptedException)
         {

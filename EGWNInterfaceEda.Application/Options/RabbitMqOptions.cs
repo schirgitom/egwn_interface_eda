@@ -18,9 +18,28 @@ public sealed class RabbitMqOptions
 
     public string ExchangeType { get; set; } = "topic";
 
-    public string RoutingKey { get; set; } = "eda.sync.result";
-
-    public string QueueName { get; set; } = "egwn.measurements";
-
     public int? MessageTtlMilliseconds { get; set; }
+
+    public RabbitMqBindingOptions Measurements { get; set; } = new()
+    {
+        RoutingKey = "eda.sync.result",
+        QueueName = "egwn.measurements",
+        DeadLetterQueue = "egwn.measurements.dlq"
+    };
+
+    public RabbitMqBindingOptions Kpis { get; set; } = new()
+    {
+        RoutingKey = "eda.sync.kpi",
+        QueueName = "egwn.kpis",
+        DeadLetterQueue = "egwn.kpis.dlq"
+    };
+}
+
+public sealed class RabbitMqBindingOptions
+{
+    public string RoutingKey { get; set; } = string.Empty;
+
+    public string QueueName { get; set; } = string.Empty;
+
+    public string DeadLetterQueue { get; set; } = string.Empty;
 }

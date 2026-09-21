@@ -1,0 +1,813 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "description": "Prometheus datenquelle, die die EGWN Interface EDA metriken scraped.",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+  ],
+  "__requires": [
+    { "type": "grafana", "id": "grafana", "name": "Grafana", "version": "10.0.0" },
+    { "type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "1.0.0" },
+    { "type": "panel", "id": "timeseries", "name": "Time series", "version": "" },
+    { "type": "panel", "id": "stat", "name": "Stat", "version": "" },
+    { "type": "panel", "id": "table", "name": "Table", "version": "" },
+    { "type": "panel", "id": "bargauge", "name": "Bar gauge", "version": "" }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["egwn", "eda", "prometheus"],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "hide": 0,
+        "includeAll": false,
+        "label": "Datasource",
+        "multi": false,
+        "name": "datasource",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      },
+      {
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "definition": "label_values(eda_meter_reading_last_attempt_timestamp_seconds, community_id)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Community",
+        "multi": true,
+        "name": "community_id",
+        "options": [],
+        "query": {
+          "query": "label_values(eda_meter_reading_last_attempt_timestamp_seconds, community_id)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "definition": "label_values(eda_meter_reading_last_attempt_timestamp_seconds{community_id=~\"$community_id\"}, meter_id)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Meter",
+        "multi": true,
+        "name": "meter_id",
+        "options": [],
+        "query": {
+          "query": "label_values(eda_meter_reading_last_attempt_timestamp_seconds{community_id=~\"$community_id\"}, meter_id)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "definition": "label_values(eda_job_next_fire_timestamp_seconds, job)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Job",
+        "multi": true,
+        "name": "job",
+        "options": [],
+        "query": {
+          "query": "label_values(eda_job_next_fire_timestamp_seconds, job)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "EGWN Interface EDA",
+  "uid": "egwn-interface-eda",
+  "version": 1,
+  "weekStart": "",
+  "panels": [
+    {
+      "type": "row",
+      "id": 100,
+      "title": "Overview",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "id": 1,
+      "title": "Meter Reading Success Rate (5m)",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 1 },
+      "targets": [
+        {
+          "expr": "sum(rate(eda_meter_reading_total{status=\"success\",community_id=~\"$community_id\",meter_id=~\"$meter_id\"}[5m])) / clamp_min(sum(rate(eda_meter_reading_total{community_id=~\"$community_id\",meter_id=~\"$meter_id\"}[5m])), 0.0000001)",
+          "refId": "A",
+          "legendFormat": "success"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 0.9 },
+              { "color": "green", "value": 0.99 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
+    },
+    {
+      "type": "stat",
+      "id": 2,
+      "title": "KPI Reading Success Rate (5m)",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 1 },
+      "targets": [
+        {
+          "expr": "sum(rate(eda_kpi_reading_total{status=\"success\",community_id=~\"$community_id\"}[5m])) / clamp_min(sum(rate(eda_kpi_reading_total{community_id=~\"$community_id\"}[5m])), 0.0000001)",
+          "refId": "A",
+          "legendFormat": "success"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 0.9 },
+              { "color": "green", "value": 0.99 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
+    },
+    {
+      "type": "stat",
+      "id": 3,
+      "title": "Active Meters",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 1 },
+      "targets": [
+        {
+          "expr": "count(count by (meter_id) (eda_meter_reading_last_attempt_timestamp_seconds{community_id=~\"$community_id\",meter_id=~\"$meter_id\"}))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
+    },
+    {
+      "type": "stat",
+      "id": 4,
+      "title": "Active Communities",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 1 },
+      "targets": [
+        {
+          "expr": "count(count by (community_id) (eda_kpi_reading_last_attempt_timestamp_seconds{community_id=~\"$community_id\"}))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "purple", "value": null }] }
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
+    },
+
+    {
+      "type": "row",
+      "id": 101,
+      "title": "Meter Readings",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "id": 10,
+      "title": "Meter Reading Rate by Status",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 7 },
+      "targets": [
+        {
+          "expr": "sum by (status) (rate(eda_meter_reading_total{community_id=~\"$community_id\",meter_id=~\"$meter_id\"}[5m]))",
+          "refId": "A",
+          "legendFormat": "{{status}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 15, "stacking": { "mode": "normal", "group": "A" } },
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "success" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] },
+          { "matcher": { "id": "byName", "options": "failure" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "lastNotNull"] } }
+    },
+    {
+      "type": "timeseries",
+      "id": 11,
+      "title": "Meter Reading Duration (p50 / p90 / p99)",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 7 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(eda_meter_reading_duration_seconds_bucket{community_id=~\"$community_id\",meter_id=~\"$meter_id\"}[5m])))",
+          "refId": "A",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum by (le) (rate(eda_meter_reading_duration_seconds_bucket{community_id=~\"$community_id\",meter_id=~\"$meter_id\"}[5m])))",
+          "refId": "B",
+          "legendFormat": "p90"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(eda_meter_reading_duration_seconds_bucket{community_id=~\"$community_id\",meter_id=~\"$meter_id\"}[5m])))",
+          "refId": "C",
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 }
+        }
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] } }
+    },
+    {
+      "type": "table",
+      "id": 12,
+      "title": "Meters – Last Success & Points",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 15 },
+      "targets": [
+        {
+          "expr": "time() - eda_meter_reading_last_success_timestamp_seconds{community_id=~\"$community_id\",meter_id=~\"$meter_id\"}",
+          "refId": "A",
+          "legendFormat": "since_success",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "expr": "time() - eda_meter_reading_last_attempt_timestamp_seconds{community_id=~\"$community_id\",meter_id=~\"$meter_id\"}",
+          "refId": "B",
+          "legendFormat": "since_attempt",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "expr": "eda_meter_reading_last_points{community_id=~\"$community_id\",meter_id=~\"$meter_id\"}",
+          "refId": "C",
+          "legendFormat": "points",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": { "byField": "meter_id", "mode": "outer" }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Time 1": true,
+              "Time 2": true,
+              "Time 3": true,
+              "__name__": true,
+              "__name__ 1": true,
+              "__name__ 2": true,
+              "__name__ 3": true,
+              "job 1": true,
+              "job 2": true,
+              "job 3": true,
+              "instance 1": true,
+              "instance 2": true,
+              "instance 3": true,
+              "community_id 2": true,
+              "community_id 3": true
+            },
+            "indexByName": {},
+            "renameByName": {
+              "community_id 1": "community_id",
+              "Value #A": "seit letztem Erfolg (s)",
+              "Value #B": "seit letztem Versuch (s)",
+              "Value #C": "letzte Punkteanzahl"
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "left" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "seit letztem Erfolg (s)" },
+            "properties": [
+              { "id": "unit", "value": "s" },
+              { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "green", "value": null },
+                    { "color": "orange", "value": 900 },
+                    { "color": "red", "value": 3600 }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "seit letztem Versuch (s)" },
+            "properties": [{ "id": "unit", "value": "s" }]
+          }
+        ]
+      }
+    },
+    {
+      "type": "bargauge",
+      "id": 13,
+      "title": "Meter Failures (letzte 1h)",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 15 },
+      "targets": [
+        {
+          "expr": "topk(20, sum by (meter_id) (increase(eda_meter_reading_total{status=\"failure\",community_id=~\"$community_id\",meter_id=~\"$meter_id\"}[1h])))",
+          "refId": "A",
+          "legendFormat": "{{meter_id}}",
+          "instant": true
+        }
+      ],
+      "options": { "orientation": "horizontal", "displayMode": "gradient", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      }
+    },
+
+    {
+      "type": "row",
+      "id": 102,
+      "title": "KPI Readings",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 25 },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "id": 20,
+      "title": "KPI Reading Rate by Status",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 26 },
+      "targets": [
+        {
+          "expr": "sum by (status) (rate(eda_kpi_reading_total{community_id=~\"$community_id\"}[5m]))",
+          "refId": "A",
+          "legendFormat": "{{status}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 15, "stacking": { "mode": "normal", "group": "A" } }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "success" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] },
+          { "matcher": { "id": "byName", "options": "failure" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] }
+        ]
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 21,
+      "title": "KPI Reading Duration (p50 / p90 / p99)",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 26 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(eda_kpi_reading_duration_seconds_bucket{community_id=~\"$community_id\"}[5m])))",
+          "refId": "A",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum by (le) (rate(eda_kpi_reading_duration_seconds_bucket{community_id=~\"$community_id\"}[5m])))",
+          "refId": "B",
+          "legendFormat": "p90"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(eda_kpi_reading_duration_seconds_bucket{community_id=~\"$community_id\"}[5m])))",
+          "refId": "C",
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 } } }
+    },
+    {
+      "type": "table",
+      "id": 22,
+      "title": "KPI – Last Success & Values",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 34 },
+      "targets": [
+        {
+          "expr": "time() - eda_kpi_reading_last_success_timestamp_seconds{community_id=~\"$community_id\"}",
+          "refId": "A",
+          "legendFormat": "since_success",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "expr": "time() - eda_kpi_reading_last_attempt_timestamp_seconds{community_id=~\"$community_id\"}",
+          "refId": "B",
+          "legendFormat": "since_attempt",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "expr": "eda_kpi_reading_last_values{community_id=~\"$community_id\"}",
+          "refId": "C",
+          "legendFormat": "values",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        { "id": "joinByField", "options": { "byField": "community_id", "mode": "outer" } },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true, "Time 1": true, "Time 2": true, "Time 3": true,
+              "__name__": true, "__name__ 1": true, "__name__ 2": true, "__name__ 3": true,
+              "job 1": true, "job 2": true, "job 3": true,
+              "instance 1": true, "instance 2": true, "instance 3": true
+            },
+            "renameByName": {
+              "Value #A": "seit letztem Erfolg (s)",
+              "Value #B": "seit letztem Versuch (s)",
+              "Value #C": "letzte Werteanzahl"
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "left" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "seit letztem Erfolg (s)" },
+            "properties": [
+              { "id": "unit", "value": "s" },
+              { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "green", "value": null },
+                    { "color": "orange", "value": 900 },
+                    { "color": "red", "value": 3600 }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "seit letztem Versuch (s)" },
+            "properties": [{ "id": "unit", "value": "s" }]
+          }
+        ]
+      }
+    },
+
+    {
+      "type": "row",
+      "id": 103,
+      "title": "Backfills",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 42 },
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "id": 30,
+      "title": "Backfill läuft?",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 43 },
+      "targets": [
+        { "expr": "eda_backfill_in_progress", "refId": "A", "legendFormat": "{{kind}}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "idle", "color": "green" }, "1": { "text": "running", "color": "orange" } } }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true }
+      }
+    },
+    {
+      "type": "bargauge",
+      "id": 31,
+      "title": "Backfill Fortschritt",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 5, "w": 18, "x": 6, "y": 43 },
+      "targets": [
+        {
+          "expr": "eda_backfill_items_completed / clamp_min(eda_backfill_item_total, 1)",
+          "refId": "A",
+          "legendFormat": "{{kind}} – completed",
+          "instant": true
+        }
+      ],
+      "options": { "orientation": "horizontal", "displayMode": "gradient", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 0.5 },
+              { "color": "green", "value": 0.9 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 32,
+      "title": "Backfill Items (completed / failed / remaining)",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 48 },
+      "targets": [
+        { "expr": "eda_backfill_items_completed", "refId": "A", "legendFormat": "{{kind}} completed" },
+        { "expr": "eda_backfill_items_failed", "refId": "B", "legendFormat": "{{kind}} failed" },
+        { "expr": "eda_backfill_items_remaining", "refId": "C", "legendFormat": "{{kind}} remaining" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 } } }
+    },
+    {
+      "type": "table",
+      "id": 33,
+      "title": "Letzter Backfill Run",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 48 },
+      "targets": [
+        { "expr": "eda_backfill_last_duration_seconds", "refId": "A", "legendFormat": "duration", "format": "table", "instant": true },
+        { "expr": "eda_backfill_last_readings", "refId": "B", "legendFormat": "readings", "format": "table", "instant": true },
+        { "expr": "time() - eda_backfill_last_completed_timestamp_seconds", "refId": "C", "legendFormat": "since_completed", "format": "table", "instant": true }
+      ],
+      "transformations": [
+        { "id": "joinByField", "options": { "byField": "kind", "mode": "outer" } },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true, "Time 1": true, "Time 2": true, "Time 3": true,
+              "__name__": true, "__name__ 1": true, "__name__ 2": true, "__name__ 3": true,
+              "job 1": true, "job 2": true, "job 3": true,
+              "instance 1": true, "instance 2": true, "instance 3": true
+            },
+            "renameByName": {
+              "Value #A": "letzte Laufzeit (s)",
+              "Value #B": "letzte Readings",
+              "Value #C": "seit Ende (s)"
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "left" } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "letzte Laufzeit (s)" }, "properties": [{ "id": "unit", "value": "s" }] },
+          { "matcher": { "id": "byName", "options": "seit Ende (s)" }, "properties": [{ "id": "unit", "value": "s" }] }
+        ]
+      }
+    },
+
+    {
+      "type": "row",
+      "id": 104,
+      "title": "Quartz Jobs",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 56 },
+      "panels": []
+    },
+    {
+      "type": "table",
+      "id": 40,
+      "title": "Job Schedule",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 57 },
+      "targets": [
+        {
+          "expr": "eda_job_next_fire_timestamp_seconds{job=~\"$job\"} * 1000",
+          "refId": "A",
+          "legendFormat": "next_fire",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "expr": "eda_job_previous_fire_timestamp_seconds{job=~\"$job\"} * 1000",
+          "refId": "B",
+          "legendFormat": "previous_fire",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "expr": "time() - eda_job_previous_fire_timestamp_seconds{job=~\"$job\"}",
+          "refId": "C",
+          "legendFormat": "since_previous",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "expr": "eda_job_next_fire_timestamp_seconds{job=~\"$job\"} - time()",
+          "refId": "D",
+          "legendFormat": "until_next",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        { "id": "joinByField", "options": { "byField": "job", "mode": "outer" } },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true, "Time 1": true, "Time 2": true, "Time 3": true, "Time 4": true,
+              "__name__": true, "__name__ 1": true, "__name__ 2": true, "__name__ 3": true, "__name__ 4": true,
+              "instance 1": true, "instance 2": true, "instance 3": true, "instance 4": true
+            },
+            "renameByName": {
+              "Value #A": "nächster Lauf",
+              "Value #B": "letzter Lauf",
+              "Value #C": "seit letztem Lauf (s)",
+              "Value #D": "bis zum nächsten Lauf (s)"
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "left" } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "nächster Lauf" }, "properties": [{ "id": "unit", "value": "dateTimeAsIso" }] },
+          { "matcher": { "id": "byName", "options": "letzter Lauf" }, "properties": [{ "id": "unit", "value": "dateTimeAsIso" }] },
+          { "matcher": { "id": "byName", "options": "seit letztem Lauf (s)" }, "properties": [{ "id": "unit", "value": "s" }] },
+          { "matcher": { "id": "byName", "options": "bis zum nächsten Lauf (s)" }, "properties": [{ "id": "unit", "value": "s" }] }
+        ]
+      }
+    },
+
+    {
+      "type": "row",
+      "id": 105,
+      "title": "HTTP",
+      "collapsed": true,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 65 },
+      "panels": [
+        {
+          "type": "timeseries",
+          "id": 50,
+          "title": "HTTP Requests/s by Status Code",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 66 },
+          "targets": [
+            {
+              "expr": "sum by (code) (rate(http_requests_received_total[5m]))",
+              "refId": "A",
+              "legendFormat": "{{code}}"
+            }
+          ],
+          "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "stacking": { "mode": "normal", "group": "A" } } } }
+        },
+        {
+          "type": "timeseries",
+          "id": 51,
+          "title": "HTTP Request Duration (p50 / p95 / p99)",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 66 },
+          "targets": [
+            { "expr": "histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))", "refId": "A", "legendFormat": "p50" },
+            { "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))", "refId": "B", "legendFormat": "p95" },
+            { "expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))", "refId": "C", "legendFormat": "p99" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 } } }
+        }
+      ]
+    }
+  ]
+}
