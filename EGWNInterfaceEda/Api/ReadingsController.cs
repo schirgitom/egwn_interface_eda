@@ -24,10 +24,14 @@ public sealed class ReadingsController(IEdaReadingOrchestrator orchestrator) : C
         Ok(await orchestrator.TriggerKpiReadingAsync(request, cancellationToken));
 
     [HttpPost("backfill/meter")]
-    public async Task<ActionResult<EdaMeterBackfillResponse>> BackfillMeterData(CancellationToken cancellationToken) =>
-        Ok(await orchestrator.TriggerHistoricalMeterBackfillAsync(cancellationToken));
+    public async Task<ActionResult<EdaMeterBackfillResponse>> BackfillMeterData(
+        [FromQuery] string? communityId,
+        CancellationToken cancellationToken) =>
+        Ok(await orchestrator.TriggerHistoricalMeterBackfillAsync(cancellationToken, communityId));
 
     [HttpPost("backfill/kpi")]
-    public async Task<ActionResult<EdaKpiBackfillResponse>> BackfillKpiData(CancellationToken cancellationToken) =>
-        Ok(await orchestrator.TriggerHistoricalKpiBackfillAsync(cancellationToken));
+    public async Task<ActionResult<EdaKpiBackfillResponse>> BackfillKpiData(
+        [FromQuery] string? communityId,
+        CancellationToken cancellationToken) =>
+        Ok(await orchestrator.TriggerHistoricalKpiBackfillAsync(cancellationToken, communityId));
 }

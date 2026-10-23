@@ -29,7 +29,7 @@ public sealed class EdaSyncOrchestrator(
 
         var periods = EdaPeriodDefinition.CreateAll(clock.UtcNow, _edaOptions.CustomFrom, _edaOptions.CustomTo);
         var customersByCommunity = customers
-            .GroupBy(customer => customer.EnergyCommunityId ?? _edaOptions.CommunityId, StringComparer.OrdinalIgnoreCase)
+            .GroupBy(customer => customer.EnergyCommunityId ?? _edaOptions.DefaultCommunityId, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
         foreach (var customerGroup in customersByCommunity)
@@ -42,7 +42,8 @@ public sealed class EdaSyncOrchestrator(
                 foreach (var customer in customerGroup)
                 {
                     var snapshot = new EdaPeriodSnapshot(period, null, meter, clock.UtcNow);
-                    var publication = new EdaSyncPublication(customer, customerGroup.Key, snapshot, clock.UtcNow);
+                    var community = _edaOptions.ResolveCommunity(customerGroup.Key);
+                    var publication = new EdaSyncPublication(customer, customerGroup.Key, community.Name, snapshot, clock.UtcNow);
                     await publisher.PublishAsync(publication, cancellationToken);
                 }
 

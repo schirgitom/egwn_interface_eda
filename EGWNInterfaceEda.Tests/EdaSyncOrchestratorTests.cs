@@ -1,3 +1,4 @@
+using System.Text.Json;
 using EGWNInterfaceEda.Application.Abstractions;
 using EGWNInterfaceEda.Application.Options;
 using EGWNInterfaceEda.Application.Services;
@@ -10,15 +11,15 @@ namespace EGWNInterfaceEda.Tests;
 public sealed class EdaSyncOrchestratorTests
 {
     [Fact]
-    public void CreateAll_uses_one_hourly_window_for_the_last_three_weeks_by_default()
+    public void CreateAll_uses_one_quarter_hourly_window_for_the_last_three_weeks_by_default()
     {
         var fixedNow = new DateTimeOffset(2026, 6, 28, 12, 0, 0, TimeSpan.Zero);
 
         var periods = EdaPeriodDefinition.CreateAll(fixedNow, null, null);
 
         var period = Assert.Single(periods);
-        Assert.Equal("letzte-21-tage-stündlich", period.Key);
-        Assert.Equal("hour", period.GroupBy);
+        Assert.Equal("letzte-21-tage-viertelstündlich", period.Key);
+        Assert.Null(period.GroupBy);
         Assert.Equal(new DateTimeOffset(2026, 6, 7, 0, 0, 0, TimeSpan.Zero), period.From);
         Assert.Equal(new DateTimeOffset(2026, 6, 28, 23, 45, 0, TimeSpan.Zero), period.To);
     }
@@ -39,7 +40,16 @@ public sealed class EdaSyncOrchestratorTests
         var publisher = new FakePublisher();
         var options = Options.Create(new EdaOptions
         {
-            CommunityId = "default-community"
+            Communities =
+            [
+                new EdaCommunityOptions
+                {
+                    Name = "Community 1",
+                    CommunityId = "community-1",
+                    Username = "user-1",
+                    Password = "password-1"
+                }
+            ]
         });
         var clock = new FakeClock(fixedNow);
 
@@ -54,11 +64,11 @@ public sealed class EdaSyncOrchestratorTests
         await sut.RunAsync(CancellationToken.None);
 
         Assert.Equal(expectedPeriods, portalClient.MeterCalls.Count);
-        Assert.Contains(portalClient.MeterCalls, call => call.Period.GroupBy == "hour");
+        Assert.Contains(portalClient.MeterCalls, call => call.Period.GroupBy is null);
         Assert.All(portalClient.MeterCalls, call => Assert.Equal("community-1", call.CommunityId));
 
         Assert.Equal(expectedPeriods * 2, portalClient.KpiCalls.Count);
-        Assert.Contains(portalClient.KpiCalls, call => call.Period.GroupBy == "hour");
+        Assert.Contains(portalClient.KpiCalls, call => call.Period.GroupBy is null);
         Assert.Equal(expectedPeriods, portalClient.KpiCalls.Count(call => call.MeterId == "meter-id-1"));
         Assert.Equal(expectedPeriods, portalClient.KpiCalls.Count(call => call.MeterId == "meter-point-2"));
 
@@ -69,7 +79,51 @@ public sealed class EdaSyncOrchestratorTests
             Assert.NotNull(publication.Snapshot.Kpi);
             Assert.False(string.IsNullOrWhiteSpace(publication.MeterPointNumber));
             Assert.Equal(publication.Customer.MeterPointNumber, publication.MeterPointNumber);
+            Assert.Equal("Community 1", publication.CommunityName);
         });
+    }
+
+    [Fact]
+    public async Task RunAsync_publishes_community_id_and_name_for_each_configured_community()
+    {
+        var fixedNow = new DateTimeOffset(2026, 6, 28, 12, 0, 0, TimeSpan.Zero);
+        var customers = new FakeCentralApiClient(
+        [
+            new CustomerMeterPoint("c-1", "Customer 1", "meter-1", "community-1"),
+            new CustomerMeterPoint("c-2", "Customer 2", "meter-2", "community-2")
+        ]);
+        var portalClient = new FakeEdaPortalClient();
+        var publisher = new FakePublisher();
+        var options = Options.Create(new EdaOptions
+        {
+            Communities =
+            [
+                new EdaCommunityOptions { Name = "Community One", CommunityId = "community-1", Username = "one", Password = "secret-one" },
+                new EdaCommunityOptions { Name = "Community Two", CommunityId = "community-2", Username = "two", Password = "secret-two" }
+            ]
+        });
+        var sut = new EdaSyncOrchestrator(
+            customers,
+            portalClient,
+            publisher,
+            options,
+            new FakeClock(fixedNow),
+            NullLogger<EdaSyncOrchestrator>.Instance);
+
+        await sut.RunAsync(CancellationToken.None);
+
+        Assert.Equal(new[] { "community-1", "community-2" }, portalClient.MeterCalls.Select(call => call.CommunityId).Order().ToArray());
+        Assert.Collection(
+            publisher.Publications.OrderBy(publication => publication.CommunityId),
+            publication => AssertSerializedCommunity(publication, "community-1", "Community One"),
+            publication => AssertSerializedCommunity(publication, "community-2", "Community Two"));
+    }
+
+    private static void AssertSerializedCommunity(EdaSyncPublication publication, string expectedId, string expectedName)
+    {
+        using var payload = JsonDocument.Parse(JsonSerializer.Serialize(publication, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        Assert.Equal(expectedId, payload.RootElement.GetProperty("communityId").GetString());
+        Assert.Equal(expectedName, payload.RootElement.GetProperty("communityName").GetString());
     }
 
     private sealed class FakeCentralApiClient(IReadOnlyList<CustomerMeterPoint> customers) : ICentralApiClient

@@ -8,7 +8,7 @@ public interface IEdaReadingOrchestrator
 
     Task<EdaReadingTriggerResponse> TriggerKpiReadingAsync(EdaTriggerRequest request, CancellationToken cancellationToken);
 
-    Task<EdaMeterBackfillResponse> TriggerHistoricalMeterBackfillAsync(CancellationToken cancellationToken);
+    Task<EdaMeterBackfillResponse> TriggerHistoricalMeterBackfillAsync(CancellationToken cancellationToken, string? communityId = null);
 
-    Task<EdaKpiBackfillResponse> TriggerHistoricalKpiBackfillAsync(CancellationToken cancellationToken);
+    Task<EdaKpiBackfillResponse> TriggerHistoricalKpiBackfillAsync(CancellationToken cancellationToken, string? communityId = null);
 }

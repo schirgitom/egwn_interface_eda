@@ -44,9 +44,8 @@ builder.Services.AddOptions<EdaOptions>()
     .Validate(options => !string.IsNullOrWhiteSpace(options.BaseUrl), "Eda:BaseUrl is required")
     .Validate(options => !string.IsNullOrWhiteSpace(options.LoginUrl), "Eda:LoginUrl is required")
     .Validate(options => !string.IsNullOrWhiteSpace(options.ConsumptionSuryaBaseUrl), "Eda:ConsumptionSuryaBaseUrl is required")
-    .Validate(options => !string.IsNullOrWhiteSpace(options.Username), "Eda:Username is required")
-    .Validate(options => !string.IsNullOrWhiteSpace(options.Password), "Eda:Password is required")
-    .Validate(options => !string.IsNullOrWhiteSpace(options.CommunityId), "Eda:CommunityId is required");
+    .Validate(options => options.HasValidCommunityConfiguration,
+        "Eda:Communities must contain unique community names, IDs, usernames, and passwords; legacy Eda:CommunityId, Eda:Username, and Eda:Password are also supported");
 
 builder.Services.AddOptions<RabbitMqOptions>()
     .BindConfiguration(RabbitMqOptions.SectionName)

@@ -1,6 +1,6 @@
 namespace EGWNInterfaceEda.Domain;
 
-public sealed record EdaPeriodDefinition(string Key, DateTimeOffset From, DateTimeOffset To, string GroupBy)
+public sealed record EdaPeriodDefinition(string Key, DateTimeOffset From, DateTimeOffset To, string? GroupBy)
 {
     public const int DefaultHistoricalDays = 21;
 
@@ -12,14 +12,14 @@ public sealed record EdaPeriodDefinition(string Key, DateTimeOffset From, DateTi
             var customEndDate = customTo ?? customFrom ?? DateOnly.FromDateTime(now.DateTime);
             var customStart = StartOfDay(customStartDate.ToDateTime(TimeOnly.MinValue), now.Offset);
             var customEnd = EndOfDay(customEndDate.ToDateTime(TimeOnly.MinValue), now.Offset);
-            return [new("custom-stündlich", customStart, customEnd, "hour")];
+            return [new("custom-viertelstündlich", customStart, customEnd, null)];
         }
 
         var from = now.AddDays(-DefaultHistoricalDays);
         var start = StartOfDay(from.Date, now.Offset);
         var end = EndOfDay(now.Date, now.Offset);
 
-        return [new($"letzte-{DefaultHistoricalDays}-tage-stündlich", start, end, "hour")];
+        return [new($"letzte-{DefaultHistoricalDays}-tage-viertelstündlich", start, end, null)];
     }
 
     private static DateTimeOffset StartOfDay(DateTime date, TimeSpan offset) =>

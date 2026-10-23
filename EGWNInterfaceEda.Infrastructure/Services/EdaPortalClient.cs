@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Collections.Concurrent;
 using EGWNInterfaceEda.Domain;
 using EGWNInterfaceEda.Application.Abstractions;
 using EGWNInterfaceEda.Application.Options;
@@ -15,48 +16,24 @@ namespace EGWNInterfaceEda.Infrastructure.Services;
 public sealed class EdaPortalClient(HttpClient httpClient, IOptions<EdaOptions> options, ILogger<EdaPortalClient> logger) : IEdaPortalClient
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
+    private static readonly TimeZoneInfo EdaSourceTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Europe/Vienna");
     private readonly EdaOptions _options = options.Value;
     private readonly SemaphoreSlim _tokenLock = new(1, 1);
-    private string? _token;
-    private DateTimeOffset? _tokenExpiryUtc;
+    private readonly ConcurrentDictionary<string, (string Token, DateTimeOffset? ExpiryUtc)> _tokens = new(StringComparer.OrdinalIgnoreCase);
 
     public async Task<EdaKpiData?> FetchKpiAsync(string communityId, EdaPeriodDefinition period, CancellationToken cancellationToken)
     {
-        var body = new
-        {
-            energyCommunityId = communityId,
-            groupBy = period.GroupBy,
-            time = new
-            {
-                @in = new
-                {
-                    min = ToEdaTimestamp(period.From),
-                    max = ToEdaTimestamp(period.To)
-                }
-            }
-        };
+        var body = BuildRequestBody(communityId, meterName: null, period);
 
-        var envelope = await PostAsync<EdaApiEnvelope<EdaKpiDto>>($"pwa/energycommunities/{communityId}/kpiData", body, cancellationToken);
+        var envelope = await PostAsync<EdaApiEnvelope<EdaKpiDto>>(communityId, $"pwa/energycommunities/{communityId}/kpiData", body, cancellationToken);
         return MapKpi(envelope);
     }
 
     public async Task<EdaMeterData?> FetchMeterDataAsync(string communityId, EdaPeriodDefinition period, CancellationToken cancellationToken)
     {
-        var body = new
-        {
-            energyCommunityId = communityId,
-            groupBy = period.GroupBy,
-            time = new
-            {
-                @in = new
-                {
-                    min = ToEdaTimestamp(period.From),
-                    max = ToEdaTimestamp(period.To)
-                }
-            }
-        };
+        var body = BuildRequestBody(communityId, meterName: null, period);
 
-        var envelope = await PostAsync<EdaApiEnvelope<EdaMeterDto>>($"pwa/energycommunities/{communityId}/meterdata", body, cancellationToken);
+        var envelope = await PostAsync<EdaApiEnvelope<EdaMeterDto>>(communityId, $"pwa/energycommunities/{communityId}/meterdata", body, cancellationToken);
         return MapMeter(envelope);
     }
 
@@ -67,24 +44,11 @@ public sealed class EdaPortalClient(HttpClient httpClient, IOptions<EdaOptions> 
         EdaConsumptionSuryaRoute route,
         CancellationToken cancellationToken)
     {
-        var body = new
-        {
-            energyCommunityId = communityId,
-            name = meterId,
-            groupBy = period.GroupBy,
-            time = new
-            {
-                @in = new
-                {
-                    min = ToEdaTimestamp(period.From),
-                    max = ToEdaTimestamp(period.To)
-                }
-            }
-        };
+        var body = BuildRequestBody(communityId, meterId, period);
 
         var routeSegment = route == EdaConsumptionSuryaRoute.G ? "g" : "p";
         var endpoint = $"{_options.ConsumptionSuryaBaseUrl.TrimEnd('/')}/consumptionsurya/{routeSegment}/{Uri.EscapeDataString(meterId)}";
-        var envelope = await PostAsync<EdaConsumptionSuryaEnvelope>(endpoint, body, cancellationToken);
+        var envelope = await PostAsync<EdaConsumptionSuryaEnvelope>(communityId, endpoint, body, cancellationToken);
         return MapConsumptionSurya(envelope);
     }
 
@@ -101,11 +65,11 @@ public sealed class EdaPortalClient(HttpClient httpClient, IOptions<EdaOptions> 
         return MergeConsumptionSurya(gTask.Result, pTask.Result);
     }
 
-    private async Task<T?> PostAsync<T>(string relativePath, object body, CancellationToken cancellationToken)
+    private async Task<T?> PostAsync<T>(string communityId, string relativePath, object body, CancellationToken cancellationToken)
     {
         for (var attempt = 1; ; attempt++)
         {
-            var token = await GetTokenAsync(forceRefresh: attempt > 1, cancellationToken);
+            var token = await GetTokenAsync(communityId, forceRefresh: attempt > 1, cancellationToken);
             using var request = new HttpRequestMessage(HttpMethod.Post, relativePath)
             {
                 Content = JsonContent.Create(body, options: SerializerOptions)
@@ -130,7 +94,7 @@ public sealed class EdaPortalClient(HttpClient httpClient, IOptions<EdaOptions> 
                     relativePath,
                     (int)response.StatusCode,
                     mediaType ?? "<none>");
-                InvalidateToken(token);
+                InvalidateToken(communityId, token);
                 continue;
             }
 
@@ -179,15 +143,15 @@ public sealed class EdaPortalClient(HttpClient httpClient, IOptions<EdaOptions> 
         }
     }
 
-    private void InvalidateToken(string? expectedToken)
+    private void InvalidateToken(string communityId, string? expectedToken)
     {
         _tokenLock.Wait();
         try
         {
-            if (expectedToken is null || string.Equals(_token, expectedToken, StringComparison.Ordinal))
+            if (_tokens.TryGetValue(communityId, out var cached)
+                && (expectedToken is null || string.Equals(cached.Token, expectedToken, StringComparison.Ordinal)))
             {
-                _token = null;
-                _tokenExpiryUtc = null;
+                _tokens.TryRemove(communityId, out _);
             }
         }
         finally
@@ -206,26 +170,29 @@ public sealed class EdaPortalClient(HttpClient httpClient, IOptions<EdaOptions> 
         return value.Length <= maxLength ? value : value[..maxLength] + "...";
     }
 
-    private async Task<string> GetTokenAsync(bool forceRefresh, CancellationToken cancellationToken)
+    private async Task<string> GetTokenAsync(string communityId, bool forceRefresh, CancellationToken cancellationToken)
     {
-        if (!forceRefresh && _token is not null && _tokenExpiryUtc is not null && _tokenExpiryUtc - DateTimeOffset.UtcNow > TimeSpan.FromMinutes(5))
+        if (!forceRefresh && _tokens.TryGetValue(communityId, out var cached)
+            && cached.ExpiryUtc is not null && cached.ExpiryUtc - DateTimeOffset.UtcNow > TimeSpan.FromMinutes(5))
         {
-            return _token;
+            return cached.Token;
         }
 
         await _tokenLock.WaitAsync(cancellationToken);
         try
         {
-            if (!forceRefresh && _token is not null && _tokenExpiryUtc is not null && _tokenExpiryUtc - DateTimeOffset.UtcNow > TimeSpan.FromMinutes(5))
+            if (!forceRefresh && _tokens.TryGetValue(communityId, out cached)
+                && cached.ExpiryUtc is not null && cached.ExpiryUtc - DateTimeOffset.UtcNow > TimeSpan.FromMinutes(5))
             {
-                return _token;
+                return cached.Token;
             }
 
-            logger.LogInformation("Logging in to EDA portal");
+            var community = _options.ResolveCommunity(communityId);
+            logger.LogInformation("Logging in to EDA portal for community {CommunityId} ({CommunityName})", community.CommunityId, community.Name);
             using var response = await httpClient.PostAsJsonAsync(_options.LoginUrl, new
             {
-                email = _options.Username,
-                password = _options.Password
+                email = community.Username,
+                password = community.Password
             }, SerializerOptions, cancellationToken);
             response.EnsureSuccessStatusCode();
 
@@ -236,9 +203,9 @@ public sealed class EdaPortalClient(HttpClient httpClient, IOptions<EdaOptions> 
                 throw new InvalidOperationException("EDA login did not return a token");
             }
 
-            _token = auth.Token;
-            _tokenExpiryUtc = ParseExpiry(auth.Exp) ?? ParseJwtExpiry(auth.Token);
-            logger.LogInformation("EDA login succeeded; token expires at {Expiry}", _tokenExpiryUtc);
+            var expiryUtc = ParseExpiry(auth.Exp) ?? ParseJwtExpiry(auth.Token);
+            _tokens[communityId] = (auth.Token, expiryUtc);
+            logger.LogInformation("EDA login succeeded for community {CommunityId}; token expires at {Expiry}", communityId, expiryUtc);
             return auth.Token;
         }
         finally
@@ -384,16 +351,55 @@ public sealed class EdaPortalClient(HttpClient httpClient, IOptions<EdaOptions> 
             return null;
         }
 
-        return DateTimeOffset.TryParse(
-            value,
-            CultureInfo.InvariantCulture,
-            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
-            out var timestamp)
-            ? timestamp
-            : null;
+        // The EDA portal returns timestamps as naive strings in Europe/Vienna local time
+        // (e.g. "2026-06-24T00:00:00", no offset, no "Z"). Interpret them as Vienna local
+        // time and convert to UTC. If a string does carry an explicit offset or "Z",
+        // honour it and normalise to UTC.
+        if (!DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed))
+        {
+            return null;
+        }
+
+        var utc = parsed.Kind switch
+        {
+            DateTimeKind.Utc => parsed,
+            DateTimeKind.Local => parsed.ToUniversalTime(),
+            _ => TimeZoneInfo.ConvertTimeToUtc(parsed, EdaSourceTimeZone)
+        };
+
+        return new DateTimeOffset(DateTime.SpecifyKind(utc, DateTimeKind.Utc), TimeSpan.Zero);
     }
 
     private static string ToEdaTimestamp(DateTimeOffset value) => value.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+
+    private static Dictionary<string, object?> BuildRequestBody(string communityId, string? meterName, EdaPeriodDefinition period)
+    {
+        var body = new Dictionary<string, object?>
+        {
+            ["energyCommunityId"] = communityId
+        };
+
+        if (meterName is not null)
+        {
+            body["name"] = meterName;
+        }
+
+        if (!string.IsNullOrWhiteSpace(period.GroupBy))
+        {
+            body["groupBy"] = period.GroupBy;
+        }
+
+        body["time"] = new
+        {
+            @in = new
+            {
+                min = ToEdaTimestamp(period.From),
+                max = ToEdaTimestamp(period.To)
+            }
+        };
+
+        return body;
+    }
 
     private static DateTimeOffset? ParseJwtExpiry(string token)
     {

@@ -25,7 +25,8 @@ public sealed class EdaReadingOrchestrator(
         // If a specific meter id is provided in the request, use it directly
         if (!string.IsNullOrWhiteSpace(request.MeterId))
         {
-            return await FetchAndPublishMeterReadingAsync(request.MeterId, _options.CommunityId, period, cancellationToken);
+            var communityId = string.IsNullOrWhiteSpace(request.CommunityId) ? _options.DefaultCommunityId : request.CommunityId;
+            return await FetchAndPublishMeterReadingAsync(request.MeterId, communityId, period, cancellationToken);
         }
 
         // Otherwise fetch all meters from Central API
@@ -39,9 +40,15 @@ public sealed class EdaReadingOrchestrator(
         var totalPoints = 0;
         foreach (var customer in customers)
         {
+            if (!string.IsNullOrWhiteSpace(request.CommunityId)
+                && !string.Equals(customer.EnergyCommunityId ?? _options.DefaultCommunityId, request.CommunityId, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             cancellationToken.ThrowIfCancellationRequested();
-            var communityId = customer.EnergyCommunityId ?? _options.CommunityId;
-            var result = await FetchAndPublishMeterReadingAsync(customer.MeterPointNumber, communityId, period, cancellationToken);
+            var customerCommunityId = customer.EnergyCommunityId ?? _options.DefaultCommunityId;
+            var result = await FetchAndPublishMeterReadingAsync(customer.MeterPointNumber, customerCommunityId, period, cancellationToken);
             totalPoints += result.ReadingCount;
         }
 
@@ -51,36 +58,46 @@ public sealed class EdaReadingOrchestrator(
     public async Task<EdaReadingTriggerResponse> TriggerKpiReadingAsync(EdaTriggerRequest request, CancellationToken cancellationToken)
     {
         var period = BuildKpiPeriod(request);
-        var start = clock.UtcNow;
-        var communityId = _options.CommunityId;
-        try
-        {
-            var kpiValues = await FetchDailyKpiValuesAsync(communityId, period.From, period.To, logProgress: false, cancellationToken);
+        var communities = string.IsNullOrWhiteSpace(request.CommunityId)
+            ? _options.GetCommunities()
+            : [_options.ResolveCommunity(request.CommunityId)];
+        var totalValues = 0;
 
-            if (kpiValues.Count == 0)
+        foreach (var community in communities)
+        {
+            var start = clock.UtcNow;
+            try
             {
-                logger.LogWarning("KPI reading returned no data for community {CommunityId} ({From} – {To}) – skipping RabbitMQ publish",
-                    communityId, period.From, period.To);
-                metrics.RecordKpiReading(communityId, 0, clock.UtcNow - start, success: false);
-                return new EdaReadingTriggerResponse(null, period.From, period.To, 0);
+                var kpiValues = await FetchDailyKpiValuesAsync(community.CommunityId, period.From, period.To, logProgress: false, cancellationToken);
+
+                if (kpiValues.Count == 0)
+                {
+                    logger.LogWarning("KPI reading returned no data for community {CommunityId} ({From} – {To}) – skipping RabbitMQ publish",
+                        community.CommunityId, period.From, period.To);
+                    metrics.RecordKpiReading(community.CommunityId, 0, clock.UtcNow - start, success: false);
+                    continue;
+                }
+
+                logger.LogInformation("KPI reading fetched {Count} daily values for community {CommunityId} ({From} – {To})",
+                    kpiValues.Count, community.CommunityId, period.From, period.To);
+
+                await publisher.PublishKpiReadingsAsync(new EdaKpiReadingsPublication(
+                    community.CommunityId,
+                    community.Name,
+                    kpiValues,
+                    clock.UtcNow), cancellationToken);
+
+                metrics.RecordKpiReading(community.CommunityId, kpiValues.Count, clock.UtcNow - start, success: true);
+                totalValues += kpiValues.Count;
             }
-
-            logger.LogInformation("KPI reading fetched {Count} daily values for community {CommunityId} ({From} – {To})",
-                kpiValues.Count, communityId, period.From, period.To);
-
-            await publisher.PublishKpiReadingsAsync(new EdaKpiReadingsPublication(
-                communityId,
-                kpiValues,
-                clock.UtcNow), cancellationToken);
-
-            metrics.RecordKpiReading(communityId, kpiValues.Count, clock.UtcNow - start, success: true);
-            return new EdaReadingTriggerResponse(null, period.From, period.To, kpiValues.Count);
+            catch
+            {
+                metrics.RecordKpiReading(community.CommunityId, 0, clock.UtcNow - start, success: false);
+                throw;
+            }
         }
-        catch
-        {
-            metrics.RecordKpiReading(communityId, 0, clock.UtcNow - start, success: false);
-            throw;
-        }
+
+        return new EdaReadingTriggerResponse(null, period.From, period.To, totalValues);
     }
 
     private async Task<List<EdaKpiValue>> FetchDailyKpiValuesAsync(
@@ -125,17 +142,32 @@ public sealed class EdaReadingOrchestrator(
         return kpiValues;
     }
 
-    public async Task<EdaMeterBackfillResponse> TriggerHistoricalMeterBackfillAsync(CancellationToken cancellationToken)
+    public async Task<EdaMeterBackfillResponse> TriggerHistoricalMeterBackfillAsync(
+        CancellationToken cancellationToken,
+        string? communityId = null)
     {
         const string kind = "meter";
         var now = clock.UtcNow;
         var from = now.AddYears(-BackfillYears);
-        var meterPeriod = new EdaPeriodDefinition("backfill", from, now, "hour");
+        var meterPeriod = new EdaPeriodDefinition("backfill", from, now, null);
+        var selectedCommunityId = string.IsNullOrWhiteSpace(communityId)
+            ? null
+            : _options.ResolveCommunity(communityId).CommunityId;
 
         var customers = await centralApiClient.GetCustomersAsync(cancellationToken);
+        if (selectedCommunityId is not null)
+        {
+            customers = customers
+                .Where(customer => string.Equals(
+                    customer.EnergyCommunityId ?? _options.DefaultCommunityId,
+                    selectedCommunityId,
+                    StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+        }
+
         if (customers.Count == 0)
         {
-            logger.LogWarning("Meter backfill: no customers/meters found via Central API");
+            logger.LogWarning("Meter backfill: no customers/meters found for community {CommunityId}", selectedCommunityId ?? "all");
             return new EdaMeterBackfillResponse(from, now, 0, 0, 0, TimeSpan.Zero);
         }
 
@@ -154,7 +186,7 @@ public sealed class EdaReadingOrchestrator(
             cancellationToken.ThrowIfCancellationRequested();
 
             var customer = customers[index];
-            var communityId = customer.EnergyCommunityId ?? _options.CommunityId;
+            var customerCommunityId = customer.EnergyCommunityId ?? _options.DefaultCommunityId;
             var meterId = customer.MeterPointNumber;
             var meterStart = clock.UtcNow;
             var meterFailed = false;
@@ -165,7 +197,7 @@ public sealed class EdaReadingOrchestrator(
 
             try
             {
-                var result = await FetchAndPublishMeterReadingAsync(meterId, communityId, meterPeriod, cancellationToken);
+                var result = await FetchAndPublishMeterReadingAsync(meterId, customerCommunityId, meterPeriod, cancellationToken);
                 meterReadings = result.ReadingCount;
                 totalReadings += meterReadings;
                 completed++;
@@ -197,7 +229,9 @@ public sealed class EdaReadingOrchestrator(
         return new EdaMeterBackfillResponse(from, now, completed, failed, totalReadings, totalElapsed);
     }
 
-    public async Task<EdaKpiBackfillResponse> TriggerHistoricalKpiBackfillAsync(CancellationToken cancellationToken)
+    public async Task<EdaKpiBackfillResponse> TriggerHistoricalKpiBackfillAsync(
+        CancellationToken cancellationToken,
+        string? communityId = null)
     {
         const string kind = "kpi";
         var now = clock.UtcNow;
@@ -206,22 +240,31 @@ public sealed class EdaReadingOrchestrator(
         // KPI-Daten sind community-weit. Wir bestimmen die relevanten Communities aus den Kunden
         // und ergänzen die Default-Community aus den Options, falls keine Kunden gefunden werden.
         var communities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        try
+        if (!string.IsNullOrWhiteSpace(communityId))
         {
-            var customers = await centralApiClient.GetCustomersAsync(cancellationToken);
-            foreach (var customer in customers)
+            communities.Add(_options.ResolveCommunity(communityId).CommunityId);
+        }
+        else
+        {
+            try
             {
-                communities.Add(customer.EnergyCommunityId ?? _options.CommunityId);
+                var customers = await centralApiClient.GetCustomersAsync(cancellationToken);
+                foreach (var customer in customers)
+                {
+                    communities.Add(customer.EnergyCommunityId ?? _options.DefaultCommunityId);
+                }
             }
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "KPI backfill: unable to load customers, falling back to default community only");
-        }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "KPI backfill: unable to load customers, falling back to configured communities");
+            }
 
-        if (communities.Count == 0)
-        {
-            communities.Add(_options.CommunityId);
+            if (communities.Count == 0)
+            {
+                communities.Add(_options.DefaultCommunityId);
+            }
+
+            communities.UnionWith(_options.GetCommunities().Select(community => community.CommunityId));
         }
 
         var communityList = communities.ToArray();
@@ -240,21 +283,22 @@ public sealed class EdaReadingOrchestrator(
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var communityId = communityList[index];
+            var currentCommunityId = communityList[index];
             var communityStart = clock.UtcNow;
             var kpiSuccess = false;
 
             logger.LogInformation("KPI backfill [{Index}/{Total}]: starting community {CommunityId}",
-                index + 1, communityCount, communityId);
+                index + 1, communityCount, currentCommunityId);
 
-            var kpiValues = await FetchDailyKpiValuesAsync(communityId, from, now, logProgress: true, cancellationToken);
+            var kpiValues = await FetchDailyKpiValuesAsync(currentCommunityId, from, now, logProgress: true, cancellationToken);
 
             if (kpiValues.Count > 0)
             {
                 try
                 {
                     await publisher.PublishKpiReadingsAsync(new EdaKpiReadingsPublication(
-                        communityId,
+                        currentCommunityId,
+                        _options.ResolveCommunity(currentCommunityId).Name,
                         kpiValues,
                         clock.UtcNow), cancellationToken);
                     kpiSuccess = true;
@@ -265,25 +309,25 @@ public sealed class EdaReadingOrchestrator(
                 {
                     failed++;
                     logger.LogError(ex, "KPI backfill [{Index}/{Total}]: failed to publish KPI readings for community {CommunityId}",
-                        index + 1, communityCount, communityId);
+                        index + 1, communityCount, currentCommunityId);
                 }
             }
             else
             {
                 failed++;
                 logger.LogWarning("KPI backfill [{Index}/{Total}]: no KPI data received for community {CommunityId}",
-                    index + 1, communityCount, communityId);
+                    index + 1, communityCount, currentCommunityId);
             }
 
             var communityElapsed = clock.UtcNow - communityStart;
-            metrics.RecordKpiReading(communityId, kpiValues.Count, communityElapsed, success: kpiSuccess);
+            metrics.RecordKpiReading(currentCommunityId, kpiValues.Count, communityElapsed, success: kpiSuccess);
             metrics.UpdateBackfillProgress(kind, completed, failed, communityCount - (index + 1));
 
             logger.LogInformation(
                 "KPI backfill [{Index}/{Total}]: {Status} community {CommunityId} in {Elapsed} — {Values} KPI values. Progress: {Ok} ok / {Failed} failed / {Remaining} remaining",
                 index + 1, communityCount,
                 kpiSuccess ? "completed" : "FAILED",
-                communityId, communityElapsed, kpiValues.Count, completed, failed, communityCount - (index + 1));
+                currentCommunityId, communityElapsed, kpiValues.Count, completed, failed, communityCount - (index + 1));
         }
 
         var totalElapsed = clock.UtcNow - backfillStart;
@@ -316,6 +360,7 @@ public sealed class EdaReadingOrchestrator(
             await publisher.PublishMeterReadingsAsync(new EdaMeterReadingsPublication(
                 meterPointNumber,
                 communityId,
+                _options.ResolveCommunity(communityId).Name,
                 readings.Points.Select(point => new EdaMeterReading(
                     point.Timestamp ?? clock.UtcNow,
                     point.TotalConsumptionValue,
@@ -337,7 +382,7 @@ public sealed class EdaReadingOrchestrator(
     {
         var from = request.FromUtc ?? DateTimeOffset.UtcNow.AddDays(-21);
         var to = request.ToUtc ?? DateTimeOffset.UtcNow;
-        return new EdaPeriodDefinition("trigger", from, to, "hour");
+        return new EdaPeriodDefinition("trigger", from, to, null);
     }
 
     private static EdaPeriodDefinition BuildKpiPeriod(EdaTriggerRequest request)
@@ -347,4 +392,3 @@ public sealed class EdaReadingOrchestrator(
         return new EdaPeriodDefinition("kpi-trigger", from, to, "day");
     }
 }
-
