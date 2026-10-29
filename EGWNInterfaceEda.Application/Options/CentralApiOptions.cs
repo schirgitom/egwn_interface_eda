@@ -10,6 +10,8 @@ public sealed class CentralApiOptions
 
     public string MeteringPointsPath { get; set; } = "api/metering-points";
 
+    public string EnergyCommunitiesPath { get; set; } = "api/energy-communities";
+
     public string AuthPath { get; set; } = "api/auth/token";
 
     public string Username { get; set; } = string.Empty;

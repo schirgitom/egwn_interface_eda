@@ -24,36 +24,35 @@ public sealed class CentralApiClient(HttpClient httpClient, IOptions<CentralApiO
     {
         var token = await GetTokenAsync(cancellationToken);
 
-        var meteringPoints = await FetchMeteringPointsAsync(token, cancellationToken);
+        var meteringPoints = await FetchCommunityMeteringPointsAsync(token, cancellationToken);
 
         if (meteringPoints.Count == 0)
         {
-            _logger.LogWarning("Central API returned no metering points");
+            _logger.LogWarning("Central API returned no metering-point community memberships");
         }
         else
         {
-            _logger.LogInformation("Central API returned {Count} metering points", meteringPoints.Count);
+            _logger.LogInformation("Central API returned {Count} metering-point community memberships", meteringPoints.Count);
         }
 
         return meteringPoints;
     }
 
-    private async Task<IReadOnlyList<CustomerMeterPoint>> FetchMeteringPointsAsync(string token, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<CustomerMeterPoint>> FetchCommunityMeteringPointsAsync(string token, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, BuildUri(_options.MeteringPointsPath));
+        using var request = new HttpRequestMessage(HttpMethod.Get, BuildUri(_options.EnergyCommunitiesPath));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
         var response = await httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         var rawJson = await response.Content.ReadAsStringAsync(cancellationToken);
-        _logger.LogDebug("Central API metering-points raw response: {Response}", rawJson);
 
         await using var stream = new System.IO.MemoryStream(System.Text.Encoding.UTF8.GetBytes(rawJson));
-        return await ReadMeteringPointsAsync(stream, cancellationToken);
+        return await ReadCommunityMeteringPointsAsync(stream, cancellationToken);
     }
 
-    private async Task<IReadOnlyList<CustomerMeterPoint>> ReadMeteringPointsAsync(Stream stream, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<CustomerMeterPoint>> ReadCommunityMeteringPointsAsync(Stream stream, CancellationToken cancellationToken)
     {
         using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
         var root = document.RootElement;
@@ -68,28 +67,35 @@ public sealed class CentralApiClient(HttpClient httpClient, IOptions<CentralApiO
         var result = new List<CustomerMeterPoint>();
         foreach (var element in array.EnumerateArray())
         {
-            var dto = element.Deserialize<CentralApiMeteringPointDto>(SerializerOptions)
-                      ?? throw new InvalidOperationException("Central API metering point item could not be parsed");
-
-            var id = FirstNonEmpty(dto.Id, dto.ExternalId);
-            if (id is null)
+            var community = element.Deserialize<CentralApiEnergyCommunityDto>(SerializerOptions)
+                            ?? throw new InvalidOperationException("Central API energy community item could not be parsed");
+            var communityId = FirstNonEmpty(community.Source);
+            if (communityId is null)
             {
-                _logger.LogWarning("Skipping metering point without id");
+                _logger.LogWarning(
+                    "Skipping Central API community {CommunityName} ({CentralCommunityId}) because its Source does not contain an EDA CommunityId",
+                    community.Name ?? "<unnamed>",
+                    community.Id);
                 continue;
             }
 
-            var meteringPointCode = FirstNonEmpty(dto.MeteringPointCode, dto.MeterPointNumber, dto.Zaehlpunktnummer, dto.Code);
-            if (meteringPointCode is null)
+            foreach (var participation in community.Participations ?? [])
             {
-                _logger.LogWarning("Skipping metering point '{Id}' because no metering point code is set", id);
-                continue;
+                var meteringPointCode = FirstNonEmpty(participation.MeteringPointCode);
+                if (meteringPointCode is null)
+                {
+                    _logger.LogWarning(
+                        "Skipping metering point membership {MeteringPointId} in community {CommunityId} because no metering point code is set",
+                        participation.MeteringPointId,
+                        communityId);
+                    continue;
+                }
+
+                var customerId = FirstNonEmpty(participation.CustomerNumber) ?? participation.MeteringPointId.ToString();
+                var customerName = FirstNonEmpty(participation.CustomerName) ?? customerId;
+
+                result.Add(new CustomerMeterPoint(customerId, customerName, meteringPointCode, communityId));
             }
-
-            var customerId = FirstNonEmpty(dto.CustomerId, dto.CustomerExternalId);
-            var customerName = FirstNonEmpty(dto.CustomerName, dto.Name) ?? customerId ?? id;
-            var communityId = FirstNonEmpty(dto.EnergyCommunityId, dto.CommunityId);
-
-            result.Add(new CustomerMeterPoint(customerId ?? id, customerName, meteringPointCode, communityId, dto.ExternalReference));
         }
 
         return result;
@@ -175,18 +181,16 @@ public sealed class CentralApiClient(HttpClient httpClient, IOptions<CentralApiO
     private sealed record CentralApiLoginResponse(
         [property: JsonPropertyName("accessToken")] string AccessToken);
 
-    private sealed record CentralApiMeteringPointDto(
-        string? Id,
-        string? ExternalId,
-        string? ExternalReference,
-        string? MeteringPointCode,
-        string? MeterPointNumber,
-        string? Zaehlpunktnummer,
-        string? Code,
-        string? CustomerId,
-        string? CustomerExternalId,
-        string? CustomerName,
+    private sealed record CentralApiEnergyCommunityDto(
+        Guid Id,
         string? Name,
-        string? EnergyCommunityId,
-        string? CommunityId);
+        string? Source,
+        IReadOnlyList<CentralApiCommunityParticipationDto>? Participations);
+
+    private sealed record CentralApiCommunityParticipationDto(
+        Guid MeteringPointId,
+        string? MeteringPointCode,
+        string? CustomerNumber,
+        string? CustomerName,
+        decimal ParticipationPercentage);
 }
