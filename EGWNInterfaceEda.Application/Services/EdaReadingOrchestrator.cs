@@ -1,4 +1,5 @@
 using EGWNInterfaceEda.Application.Abstractions;
+using EGWNInterfaceEda.Application.Exceptions;
 using EGWNInterfaceEda.Application.Options;
 using EGWNInterfaceEda.Domain;
 using Microsoft.Extensions.Logging;
@@ -48,8 +49,16 @@ public sealed class EdaReadingOrchestrator(
 
             cancellationToken.ThrowIfCancellationRequested();
             var customerCommunityId = customer.EnergyCommunityId ?? _options.DefaultCommunityId;
-            var result = await FetchAndPublishMeterReadingAsync(customer.MeterPointNumber, customerCommunityId, period, cancellationToken);
-            totalPoints += result.ReadingCount;
+            try
+            {
+                var result = await FetchAndPublishMeterReadingAsync(customer.MeterPointNumber, customerCommunityId, period, cancellationToken);
+                totalPoints += result.ReadingCount;
+            }
+            catch (EdaMeterPointNotFoundException)
+            {
+                logger.LogError("EDA did not find meter point {MeterId} in community {CommunityId}; continuing with the next meter",
+                    customer.MeterPointNumber, customerCommunityId);
+            }
         }
 
         return new EdaReadingTriggerResponse(null, period.From, period.To, totalPoints);
@@ -370,6 +379,12 @@ public sealed class EdaReadingOrchestrator(
 
             metrics.RecordMeterReading(meterPointNumber, communityId, readings.Points.Count, clock.UtcNow - start, success: true);
             return new EdaReadingTriggerResponse(meterPointNumber, period.From, period.To, readings.Points.Count);
+        }
+        catch (EdaMeterPointNotFoundException)
+        {
+            metrics.RecordMeterPointNotFound(meterPointNumber, communityId);
+            metrics.RecordMeterReading(meterPointNumber, communityId, 0, clock.UtcNow - start, success: false);
+            throw;
         }
         catch
         {

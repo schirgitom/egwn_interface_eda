@@ -40,3 +40,9 @@ Interface EDA App (`/metrics` Endpoint) exportiert werden.
 
 - `datasource` – Prometheus-Datasource.
 - `community_id`, `meter_id`, `job` – Multi-Select-Filter.
+
+Für Zählpunkte, die EDA mit „Kein Zählpunkt gefunden“ ablehnt, wird der
+Prometheus-Counter `eda_meter_points_not_found_total{meter_id="...",community_id="..."}`
+bei jedem Fehlversuch um eins erhöht (sowohl beim regulären Abruf als auch beim
+Backfill). Ein Grafana-Panel kann die betroffenen Zählpunkte mit
+`sum by (community_id, meter_id) (eda_meter_points_not_found_total)` anzeigen.

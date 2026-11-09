@@ -40,7 +40,8 @@ public sealed class CentralApiClient(HttpClient httpClient, IOptions<CentralApiO
 
     private async Task<IReadOnlyList<CustomerMeterPoint>> FetchCommunityMeteringPointsAsync(string token, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, BuildUri(_options.EnergyCommunitiesPath));
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get, BuildUri($"{_options.EnergyCommunitiesPath.TrimEnd('/')}?source=EDA"));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
         var response = await httpClient.SendAsync(request, cancellationToken);
@@ -61,7 +62,7 @@ public sealed class CentralApiClient(HttpClient httpClient, IOptions<CentralApiO
         {
             JsonValueKind.Array => root,
             JsonValueKind.Object when TryGetCollection(root, out var items) => items,
-            _ => throw new InvalidOperationException("Central API metering-points response does not contain an array")
+            _ => throw new InvalidOperationException("Central API energy communities response does not contain an array")
         };
 
         var result = new List<CustomerMeterPoint>();
@@ -69,11 +70,11 @@ public sealed class CentralApiClient(HttpClient httpClient, IOptions<CentralApiO
         {
             var community = element.Deserialize<CentralApiEnergyCommunityDto>(SerializerOptions)
                             ?? throw new InvalidOperationException("Central API energy community item could not be parsed");
-            var communityId = FirstNonEmpty(community.Source);
+            var communityId = FirstNonEmpty(community.SourceId);
             if (communityId is null)
             {
                 _logger.LogWarning(
-                    "Skipping Central API community {CommunityName} ({CentralCommunityId}) because its Source does not contain an EDA CommunityId",
+                    "Skipping Central API community {CommunityName} ({CentralCommunityId}) because its SourceId does not contain an EDA CommunityId",
                     community.Name ?? "<unnamed>",
                     community.Id);
                 continue;
@@ -184,7 +185,7 @@ public sealed class CentralApiClient(HttpClient httpClient, IOptions<CentralApiO
     private sealed record CentralApiEnergyCommunityDto(
         Guid Id,
         string? Name,
-        string? Source,
+        string? SourceId,
         IReadOnlyList<CentralApiCommunityParticipationDto>? Participations);
 
     private sealed record CentralApiCommunityParticipationDto(

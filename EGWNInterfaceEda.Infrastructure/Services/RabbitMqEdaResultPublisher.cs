@@ -58,7 +58,7 @@ public sealed class RabbitMqEdaResultPublisher : IEdaResultPublisher, IEdaTrigge
             }
 
             channel.BasicPublish(_options.Exchange, routingKey, properties, body);
-            _logger.LogDebug("RabbitMQ published {Type} → exchange={Exchange}, routingKey={RoutingKey}, messageId={MessageId}, size={Size}B, payload={Payload}",
+            _logger.LogTrace("RabbitMQ published {Type} → exchange={Exchange}, routingKey={RoutingKey}, messageId={MessageId}, size={Size}B, payload={Payload}",
                 typeof(T).Name, _options.Exchange, routingKey, properties.MessageId, body.Length, payload);
         }
         catch (Exception ex) when (ex is BrokerUnreachableException or AuthenticationFailureException or IOException or OperationInterruptedException)

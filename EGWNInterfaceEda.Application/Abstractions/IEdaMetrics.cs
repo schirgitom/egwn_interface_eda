@@ -4,6 +4,8 @@ public interface IEdaMetrics
 {
     void RecordMeterReading(string meterId, string communityId, int pointCount, TimeSpan duration, bool success);
 
+    void RecordMeterPointNotFound(string meterId, string communityId);
+
     void RecordKpiReading(string communityId, int valueCount, TimeSpan duration, bool success);
 
     void RecordBackfillStarted(string kind, int itemCount);

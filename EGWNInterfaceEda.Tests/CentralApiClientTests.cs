@@ -10,24 +10,26 @@ namespace EGWNInterfaceEda.Tests;
 public sealed class CentralApiClientTests
 {
     [Fact]
-    public async Task GetCustomersAsync_uses_community_source_as_eda_id_for_each_participation()
+    public async Task GetCustomersAsync_filters_eda_communities_and_uses_source_id_for_each_participation()
     {
         const string baseUrl = "https://central.example/";
-        var requests = new List<(string Path, string? Authorization)>();
+        var requests = new List<(string PathAndQuery, string? Authorization)>();
         var handler = new StubHttpMessageHandler(request =>
         {
-            requests.Add((request.RequestUri!.AbsolutePath, request.Headers.Authorization?.ToString()));
+            requests.Add((request.RequestUri!.PathAndQuery, request.Headers.Authorization?.ToString()));
             if (request.RequestUri.AbsolutePath.EndsWith("/api/auth/token", StringComparison.Ordinal))
             {
                 return JsonResponse("""{"accessToken":"test-token"}""");
             }
 
+            Assert.Equal("/api/energy-communities/by-source?source=EDA", request.RequestUri.PathAndQuery);
             return JsonResponse("""
                 [
                   {
                     "id": "10000000-0000-0000-0000-000000000001",
                     "name": "Community One",
-                    "source": "eda-community-1",
+                    "source": "EDA",
+                    "sourceId": "eda-community-1",
                     "participations": [
                       {
                         "meteringPointId": "20000000-0000-0000-0000-000000000001",
@@ -48,7 +50,8 @@ public sealed class CentralApiClientTests
                   {
                     "id": "10000000-0000-0000-0000-000000000002",
                     "name": "Community Two",
-                    "source": "eda-community-2",
+                    "source": "EDA",
+                    "sourceId": "eda-community-2",
                     "participations": [
                       {
                         "meteringPointId": "20000000-0000-0000-0000-000000000002",
@@ -62,7 +65,8 @@ public sealed class CentralApiClientTests
                   {
                     "id": "10000000-0000-0000-0000-000000000003",
                     "name": "Unmapped Community",
-                    "source": null,
+                    "source": "EDA",
+                    "sourceId": null,
                     "participations": [
                       {
                         "meteringPointId": "20000000-0000-0000-0000-000000000003",
@@ -84,7 +88,6 @@ public sealed class CentralApiClientTests
             {
                 BaseUrl = baseUrl,
                 AuthPath = "api/auth/token",
-                EnergyCommunitiesPath = "api/energy-communities",
                 Username = "central-user",
                 Password = "central-password"
             }),
@@ -114,8 +117,31 @@ public sealed class CentralApiClientTests
                 Assert.Equal("meter-point-shared", item.MeterPointNumber);
                 Assert.Equal("eda-community-2", item.EnergyCommunityId);
             });
-        Assert.Equal(new[] { "/api/auth/token", "/api/energy-communities" }, requests.Select(request => request.Path));
+        Assert.Equal(new[] { "/api/auth/token", "/api/energy-communities/by-source?source=EDA" }, requests.Select(request => request.PathAndQuery));
         Assert.Equal("Bearer test-token", requests[1].Authorization);
+    }
+
+    [Fact]
+    public async Task GetCustomersAsync_returns_no_memberships_when_eda_source_has_no_communities()
+    {
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            if (request.RequestUri!.AbsolutePath.EndsWith("/api/auth/token", StringComparison.Ordinal))
+            {
+                return JsonResponse("""{"accessToken":"test-token"}""");
+            }
+
+            Assert.Equal("/api/energy-communities/by-source?source=EDA", request.RequestUri.PathAndQuery);
+            return JsonResponse("[]");
+        });
+
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://central.example/") };
+        var client = new CentralApiClient(
+            httpClient,
+            Options.Create(new CentralApiOptions { Username = "central-user", Password = "central-password" }),
+            NullLogger<CentralApiClient>.Instance);
+
+        Assert.Empty(await client.GetCustomersAsync(CancellationToken.None));
     }
 
     private static HttpResponseMessage JsonResponse(string json) =>

@@ -7,6 +7,7 @@ using System.Text.Json.Serialization;
 using System.Collections.Concurrent;
 using EGWNInterfaceEda.Domain;
 using EGWNInterfaceEda.Application.Abstractions;
+using EGWNInterfaceEda.Application.Exceptions;
 using EGWNInterfaceEda.Application.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -100,6 +101,13 @@ public sealed class EdaPortalClient(HttpClient httpClient, IOptions<EdaOptions> 
 
             if (!response.IsSuccessStatusCode)
             {
+                if (response.StatusCode == System.Net.HttpStatusCode.NotFound
+                    && relativePath.Contains("/consumptionsurya/", StringComparison.OrdinalIgnoreCase)
+                    && IsMeterPointNotFound(raw))
+                {
+                    throw new EdaMeterPointNotFoundException(relativePath);
+                }
+
                 logger.LogError(
                     "EDA endpoint '{Path}' returned {StatusCode}. Content-Type: {ContentType}. Body: {Body}",
                     relativePath,
@@ -140,6 +148,22 @@ public sealed class EdaPortalClient(HttpClient httpClient, IOptions<EdaOptions> 
                     Truncate(raw, 1000));
                 throw;
             }
+        }
+    }
+
+    private static bool IsMeterPointNotFound(string body)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                   && document.RootElement.TryGetProperty("errorMessage", out var message)
+                   && message.ValueKind == JsonValueKind.String
+                   && string.Equals(message.GetString(), "Kein Zählpunkt gefunden", StringComparison.Ordinal);
+        }
+        catch (JsonException)
+        {
+            return false;
         }
     }
 

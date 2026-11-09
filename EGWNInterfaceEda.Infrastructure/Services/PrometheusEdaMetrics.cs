@@ -31,6 +31,11 @@ public sealed class PrometheusEdaMetrics : IEdaMetrics
         "Total number of meter reading attempts, labeled by status (success/failure).",
         MeterStatusLabels);
 
+    private static readonly Counter MeterPointsNotFoundTotal = Metrics.CreateCounter(
+        "eda_meter_points_not_found_total",
+        "Number of EDA meter requests that returned 'Kein Zählpunkt gefunden', per meter and community.",
+        MeterLabels);
+
     private static readonly Histogram MeterReadingDuration = Metrics.CreateHistogram(
         "eda_meter_reading_duration_seconds",
         "Duration of meter reading fetch+publish operations, in seconds.",
@@ -134,6 +139,9 @@ public sealed class PrometheusEdaMetrics : IEdaMetrics
             MeterLastPoints.WithLabels(meterId, communityId).Set(pointCount);
         }
     }
+
+    public void RecordMeterPointNotFound(string meterId, string communityId) =>
+        MeterPointsNotFoundTotal.WithLabels(meterId, communityId).Inc();
 
     public void RecordKpiReading(string communityId, int valueCount, TimeSpan duration, bool success)
     {

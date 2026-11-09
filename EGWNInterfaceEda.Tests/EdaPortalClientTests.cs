@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using EGWNInterfaceEda.Application.Options;
+using EGWNInterfaceEda.Application.Exceptions;
 using EGWNInterfaceEda.Domain;
 using EGWNInterfaceEda.Infrastructure.Services;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -12,6 +13,43 @@ namespace EGWNInterfaceEda.Tests;
 
 public sealed class EdaPortalClientTests
 {
+    [Theory]
+    [InlineData("""{"success":false,"errorMessage":"Kein Zählpunkt gefunden"}""", true)]
+    [InlineData("""{"success":false,"errorMessage":"Andere Ursache"}""", false)]
+    public async Task FetchConsumptionSuryaAsync_distinguishes_missing_meter_from_other_404s(string errorBody, bool meterMissing)
+    {
+        var options = new EdaOptions
+        {
+            BaseUrl = "https://eda.example/api",
+            LoginUrl = "https://eda.example/api/login",
+            ConsumptionSuryaBaseUrl = "https://eda.example/api",
+            CommunityId = "community-1",
+            Username = "user@example.test",
+            Password = "secret"
+        };
+        var handler = new StubHttpMessageHandler(request =>
+            request.RequestUri!.AbsoluteUri == options.LoginUrl
+                ? JsonResponse("""{"token":"test-token","exp":"2099-07-05T12:19:53Z"}""")
+                : new HttpResponseMessage(HttpStatusCode.NotFound)
+                {
+                    Content = new StringContent(errorBody, Encoding.UTF8, "application/json")
+                });
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://eda.example/api/") };
+        var sut = new EdaPortalClient(httpClient, Options.Create(options), NullLogger<EdaPortalClient>.Instance);
+        var period = new EdaPeriodDefinition("trigger", DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow, null);
+
+        if (meterMissing)
+        {
+            await Assert.ThrowsAsync<EdaMeterPointNotFoundException>(() =>
+                sut.FetchConsumptionSuryaAsync(options.CommunityId, "missing-meter", period, EdaConsumptionSuryaRoute.P, CancellationToken.None));
+        }
+        else
+        {
+            await Assert.ThrowsAsync<HttpRequestException>(() =>
+                sut.FetchConsumptionSuryaAsync(options.CommunityId, "missing-meter", period, EdaConsumptionSuryaRoute.P, CancellationToken.None));
+        }
+    }
+
     [Fact]
     public async Task FetchConsumptionSuryaAsync_route_p_uses_meter_id_in_url()
     {
