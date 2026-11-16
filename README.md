@@ -29,6 +29,8 @@ For each community in the Central API, set `Source` to `EDA` (case-sensitive) an
 
 RabbitMQ publications include both `communityId` and `communityName`, allowing persistence consumers to distinguish and label readings from different communities. KPI triggers without a `communityId` process every configured community; callers can pass a `communityId` in the request to select one.
 
+Meter reading and legacy sync publications also include `energyDirection` (`generation` or `consumption`). The value comes from each Central API participation's `EnergyDirection` (`Generation` or `Consumption`); missing or unknown values fail explicitly rather than publishing an unlabeled meter. Manual meter triggers look up the meter in the Central API as well and publish once per matching community assignment.
+
 Historical backfills cover the last two years. To backfill one configured community, pass its ID as a query parameter:
 
 ```text

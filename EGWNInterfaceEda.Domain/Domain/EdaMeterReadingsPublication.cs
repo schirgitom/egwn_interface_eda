@@ -5,4 +5,5 @@ public sealed record EdaMeterReadingsPublication(
     string CommunityId,
     string CommunityName,
     IReadOnlyList<EdaMeterReading> Readings,
-    DateTimeOffset CreatedAtUtc);
+    DateTimeOffset CreatedAtUtc,
+    string EnergyDirection);

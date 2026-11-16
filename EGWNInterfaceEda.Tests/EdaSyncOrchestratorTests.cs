@@ -32,8 +32,8 @@ public sealed class EdaSyncOrchestratorTests
 
         var centralApiClient = new FakeCentralApiClient(
         [
-            new CustomerMeterPoint("c-1", "Customer 1", "meter-point-1", "community-1", "meter-id-1"),
-            new CustomerMeterPoint("c-2", "Customer 2", "meter-point-2", "community-1", null)
+            new CustomerMeterPoint("c-1", "Customer 1", "meter-point-1", "generation", "community-1", "meter-id-1"),
+            new CustomerMeterPoint("c-2", "Customer 2", "meter-point-2", "consumption", "community-1", null)
         ]);
 
         var portalClient = new FakeEdaPortalClient();
@@ -89,8 +89,8 @@ public sealed class EdaSyncOrchestratorTests
         var fixedNow = new DateTimeOffset(2026, 6, 28, 12, 0, 0, TimeSpan.Zero);
         var customers = new FakeCentralApiClient(
         [
-            new CustomerMeterPoint("c-1", "Customer 1", "meter-1", "community-1"),
-            new CustomerMeterPoint("c-2", "Customer 2", "meter-2", "community-2")
+            new CustomerMeterPoint("c-1", "Customer 1", "meter-1", "generation", "community-1"),
+            new CustomerMeterPoint("c-2", "Customer 2", "meter-2", "consumption", "community-2")
         ]);
         var portalClient = new FakeEdaPortalClient();
         var publisher = new FakePublisher();
@@ -115,15 +115,16 @@ public sealed class EdaSyncOrchestratorTests
         Assert.Equal(new[] { "community-1", "community-2" }, portalClient.MeterCalls.Select(call => call.CommunityId).Order().ToArray());
         Assert.Collection(
             publisher.Publications.OrderBy(publication => publication.CommunityId),
-            publication => AssertSerializedCommunity(publication, "community-1", "Community One"),
-            publication => AssertSerializedCommunity(publication, "community-2", "Community Two"));
+            publication => AssertSerializedCommunity(publication, "community-1", "Community One", "generation"),
+            publication => AssertSerializedCommunity(publication, "community-2", "Community Two", "consumption"));
     }
 
-    private static void AssertSerializedCommunity(EdaSyncPublication publication, string expectedId, string expectedName)
+    private static void AssertSerializedCommunity(EdaSyncPublication publication, string expectedId, string expectedName, string expectedDirection)
     {
         using var payload = JsonDocument.Parse(JsonSerializer.Serialize(publication, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
         Assert.Equal(expectedId, payload.RootElement.GetProperty("communityId").GetString());
         Assert.Equal(expectedName, payload.RootElement.GetProperty("communityName").GetString());
+        Assert.Equal(expectedDirection, payload.RootElement.GetProperty("energyDirection").GetString());
     }
 
     private sealed class FakeCentralApiClient(IReadOnlyList<CustomerMeterPoint> customers) : ICentralApiClient

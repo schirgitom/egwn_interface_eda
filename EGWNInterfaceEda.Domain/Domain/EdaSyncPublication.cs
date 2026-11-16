@@ -8,4 +8,6 @@ public sealed record EdaSyncPublication(
     DateTimeOffset CreatedAtUtc)
 {
     public string MeterPointNumber => Customer.MeterPointNumber;
+
+    public string EnergyDirection => Customer.EnergyDirection;
 }

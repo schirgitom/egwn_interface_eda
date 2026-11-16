@@ -23,24 +23,28 @@ public sealed class EdaReadingOrchestrator(
     {
         var period = BuildPeriod(request);
 
-        // If a specific meter id is provided in the request, use it directly
-        if (!string.IsNullOrWhiteSpace(request.MeterId))
-        {
-            var communityId = string.IsNullOrWhiteSpace(request.CommunityId) ? _options.DefaultCommunityId : request.CommunityId;
-            return await FetchAndPublishMeterReadingAsync(request.MeterId, communityId, period, cancellationToken);
-        }
-
-        // Otherwise fetch all meters from Central API
         var customers = await centralApiClient.GetCustomersAsync(cancellationToken);
         if (customers.Count == 0)
         {
+            if (!string.IsNullOrWhiteSpace(request.MeterId))
+            {
+                throw new InvalidOperationException($"Meter point '{request.MeterId}' has no EDA assignment in the Central API.");
+            }
+
             logger.LogWarning("Skipping meter reading because no customers/meters found via Central API");
             return new EdaReadingTriggerResponse(null, period.From, period.To, 0);
         }
 
         var totalPoints = 0;
+        var matched = 0;
         foreach (var customer in customers)
         {
+            if (!string.IsNullOrWhiteSpace(request.MeterId)
+                && !string.Equals(customer.MeterPointNumber, request.MeterId, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             if (!string.IsNullOrWhiteSpace(request.CommunityId)
                 && !string.Equals(customer.EnergyCommunityId ?? _options.DefaultCommunityId, request.CommunityId, StringComparison.OrdinalIgnoreCase))
             {
@@ -48,10 +52,11 @@ public sealed class EdaReadingOrchestrator(
             }
 
             cancellationToken.ThrowIfCancellationRequested();
+            matched++;
             var customerCommunityId = customer.EnergyCommunityId ?? _options.DefaultCommunityId;
             try
             {
-                var result = await FetchAndPublishMeterReadingAsync(customer.MeterPointNumber, customerCommunityId, period, cancellationToken);
+                var result = await FetchAndPublishMeterReadingAsync(customer.MeterPointNumber, customerCommunityId, customer.EnergyDirection, period, cancellationToken);
                 totalPoints += result.ReadingCount;
             }
             catch (EdaMeterPointNotFoundException)
@@ -61,7 +66,12 @@ public sealed class EdaReadingOrchestrator(
             }
         }
 
-        return new EdaReadingTriggerResponse(null, period.From, period.To, totalPoints);
+        if (matched == 0 && !string.IsNullOrWhiteSpace(request.MeterId))
+        {
+            throw new InvalidOperationException($"Meter point '{request.MeterId}' has no EDA assignment in the Central API for community '{request.CommunityId ?? "any"}'.");
+        }
+
+        return new EdaReadingTriggerResponse(request.MeterId, period.From, period.To, totalPoints);
     }
 
     public async Task<EdaReadingTriggerResponse> TriggerKpiReadingAsync(EdaTriggerRequest request, CancellationToken cancellationToken)
@@ -206,7 +216,7 @@ public sealed class EdaReadingOrchestrator(
 
             try
             {
-                var result = await FetchAndPublishMeterReadingAsync(meterId, customerCommunityId, meterPeriod, cancellationToken);
+                var result = await FetchAndPublishMeterReadingAsync(meterId, customerCommunityId, customer.EnergyDirection, meterPeriod, cancellationToken);
                 meterReadings = result.ReadingCount;
                 totalReadings += meterReadings;
                 completed++;
@@ -349,7 +359,7 @@ public sealed class EdaReadingOrchestrator(
     }
 
     private async Task<EdaReadingTriggerResponse> FetchAndPublishMeterReadingAsync(
-        string meterPointNumber, string communityId, EdaPeriodDefinition period, CancellationToken cancellationToken)
+        string meterPointNumber, string communityId, string energyDirection, EdaPeriodDefinition period, CancellationToken cancellationToken)
     {
         var start = clock.UtcNow;
         try
@@ -375,7 +385,8 @@ public sealed class EdaReadingOrchestrator(
                     point.TotalConsumptionValue,
                     point.GridShareValue,
                     point.CommunityShareValue)).ToArray(),
-                clock.UtcNow), cancellationToken);
+                clock.UtcNow,
+                energyDirection), cancellationToken);
 
             metrics.RecordMeterReading(meterPointNumber, communityId, readings.Points.Count, clock.UtcNow - start, success: true);
             return new EdaReadingTriggerResponse(meterPointNumber, period.From, period.To, readings.Points.Count);

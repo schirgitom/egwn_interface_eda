@@ -36,6 +36,7 @@ public sealed class CentralApiClientTests
                         "meteringPointCode": "meter-point-1",
                         "customerNumber": "customer-1",
                         "customerName": "Customer One",
+                        "energyDirection": "Generation",
                         "participationPercentage": 100
                       },
                       {
@@ -43,6 +44,7 @@ public sealed class CentralApiClientTests
                         "meteringPointCode": "meter-point-shared",
                         "customerNumber": "customer-2",
                         "customerName": "Customer Two",
+                        "energyDirection": "Consumption",
                         "participationPercentage": 50
                       }
                     ]
@@ -58,6 +60,7 @@ public sealed class CentralApiClientTests
                         "meteringPointCode": "meter-point-shared",
                         "customerNumber": "customer-2",
                         "customerName": "Customer Two",
+                        "energyDirection": "Generation",
                         "participationPercentage": 50
                       }
                     ]
@@ -73,6 +76,7 @@ public sealed class CentralApiClientTests
                         "meteringPointCode": "meter-point-unmapped",
                         "customerNumber": "customer-3",
                         "customerName": "Customer Three",
+                        "energyDirection": "Consumption",
                         "participationPercentage": 100
                       }
                     ]
@@ -103,18 +107,21 @@ public sealed class CentralApiClientTests
                 Assert.Equal("customer-1", item.CustomerId);
                 Assert.Equal("Customer One", item.CustomerName);
                 Assert.Equal("meter-point-1", item.MeterPointNumber);
+                Assert.Equal("generation", item.EnergyDirection);
                 Assert.Equal("eda-community-1", item.EnergyCommunityId);
             },
             item =>
             {
                 Assert.Equal("customer-2", item.CustomerId);
                 Assert.Equal("meter-point-shared", item.MeterPointNumber);
+                Assert.Equal("consumption", item.EnergyDirection);
                 Assert.Equal("eda-community-1", item.EnergyCommunityId);
             },
             item =>
             {
                 Assert.Equal("customer-2", item.CustomerId);
                 Assert.Equal("meter-point-shared", item.MeterPointNumber);
+                Assert.Equal("generation", item.EnergyDirection);
                 Assert.Equal("eda-community-2", item.EnergyCommunityId);
             });
         Assert.Equal(new[] { "/api/auth/token", "/api/energy-communities/by-source?source=EDA" }, requests.Select(request => request.PathAndQuery));
@@ -142,6 +149,25 @@ public sealed class CentralApiClientTests
             NullLogger<CentralApiClient>.Instance);
 
         Assert.Empty(await client.GetCustomersAsync(CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("Unknown")]
+    public async Task GetCustomersAsync_rejects_missing_or_unknown_energy_direction(string? energyDirection)
+    {
+        var handler = new StubHttpMessageHandler(request =>
+            request.RequestUri!.AbsolutePath.EndsWith("/api/auth/token", StringComparison.Ordinal)
+                ? JsonResponse("""{"accessToken":"test-token"}""")
+                : JsonResponse($$"""
+                    [{"id":"10000000-0000-0000-0000-000000000001","sourceId":"eda-community-1",
+                      "participations":[{"meteringPointId":"20000000-0000-0000-0000-000000000001",
+                                         "meteringPointCode":"meter-1","energyDirection":{{(energyDirection is null ? "null" : $"\"{energyDirection}\"")}}}]}]
+                    """));
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://central.example/") };
+        var client = new CentralApiClient(httpClient, Options.Create(new CentralApiOptions()), NullLogger<CentralApiClient>.Instance);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => client.GetCustomersAsync(CancellationToken.None));
     }
 
     private static HttpResponseMessage JsonResponse(string json) =>

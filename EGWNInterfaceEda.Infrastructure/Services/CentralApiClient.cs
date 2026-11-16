@@ -94,8 +94,15 @@ public sealed class CentralApiClient(HttpClient httpClient, IOptions<CentralApiO
 
                 var customerId = FirstNonEmpty(participation.CustomerNumber) ?? participation.MeteringPointId.ToString();
                 var customerName = FirstNonEmpty(participation.CustomerName) ?? customerId;
+                var energyDirection = participation.EnergyDirection switch
+                {
+                    "Generation" => "generation",
+                    "Consumption" => "consumption",
+                    _ => throw new InvalidOperationException(
+                        $"Metering point '{meteringPointCode}' in community '{communityId}' has an invalid EnergyDirection '{participation.EnergyDirection ?? "<null>"}'")
+                };
 
-                result.Add(new CustomerMeterPoint(customerId, customerName, meteringPointCode, communityId));
+                result.Add(new CustomerMeterPoint(customerId, customerName, meteringPointCode, energyDirection, communityId));
             }
         }
 
@@ -193,5 +200,6 @@ public sealed class CentralApiClient(HttpClient httpClient, IOptions<CentralApiO
         string? MeteringPointCode,
         string? CustomerNumber,
         string? CustomerName,
+        string? EnergyDirection,
         decimal ParticipationPercentage);
 }

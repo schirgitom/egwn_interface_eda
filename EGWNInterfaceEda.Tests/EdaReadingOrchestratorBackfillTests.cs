@@ -5,6 +5,7 @@ using EGWNInterfaceEda.Application.Services;
 using EGWNInterfaceEda.Domain;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using System.Text.Json;
 
 namespace EGWNInterfaceEda.Tests;
 
@@ -17,8 +18,8 @@ public sealed class EdaReadingOrchestratorBackfillTests
     {
         var customers = new FakeCentralApiClient(
         [
-            new CustomerMeterPoint("c-1", "Customer 1", "meter-1", "community-1"),
-            new CustomerMeterPoint("c-2", "Customer 2", "meter-2", "community-2")
+            new CustomerMeterPoint("c-1", "Customer 1", "meter-1", "generation", "community-1"),
+            new CustomerMeterPoint("c-2", "Customer 2", "meter-2", "consumption", "community-2")
         ]);
         var portal = new FakeEdaPortalClient();
         var publisher = new FakePublisher();
@@ -31,6 +32,9 @@ public sealed class EdaReadingOrchestratorBackfillTests
         Assert.Equal([("community-2", "meter-2")], portal.MeterCalls);
         Assert.Equal("community-2", Assert.Single(publisher.MeterPublications).CommunityId);
         Assert.Equal("Community Two", publisher.MeterPublications[0].CommunityName);
+        Assert.Equal("consumption", publisher.MeterPublications[0].EnergyDirection);
+        using var payload = JsonDocument.Parse(JsonSerializer.Serialize(publisher.MeterPublications[0], new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        Assert.Equal("consumption", payload.RootElement.GetProperty("energyDirection").GetString());
     }
 
     [Fact]
@@ -38,8 +42,8 @@ public sealed class EdaReadingOrchestratorBackfillTests
     {
         var customers = new FakeCentralApiClient(
         [
-            new CustomerMeterPoint("c-1", "Customer 1", "missing-meter", "community-1"),
-            new CustomerMeterPoint("c-2", "Customer 2", "meter-2", "community-1")
+            new CustomerMeterPoint("c-1", "Customer 1", "missing-meter", "generation", "community-1"),
+            new CustomerMeterPoint("c-2", "Customer 2", "meter-2", "consumption", "community-1")
         ]);
         var portal = new FakeEdaPortalClient { MissingMeterId = "missing-meter" };
         var publisher = new FakePublisher();
@@ -51,6 +55,7 @@ public sealed class EdaReadingOrchestratorBackfillTests
         Assert.Equal(1, response.ReadingCount);
         Assert.Equal([("community-1", "missing-meter"), ("community-1", "meter-2")], portal.MeterCalls);
         Assert.Equal("meter-2", Assert.Single(publisher.MeterPublications).MeterPointNumber);
+        Assert.Equal("consumption", publisher.MeterPublications[0].EnergyDirection);
         Assert.Equal([("missing-meter", "community-1")], metrics.MissingMeters);
     }
 
@@ -59,8 +64,8 @@ public sealed class EdaReadingOrchestratorBackfillTests
     {
         var customers = new FakeCentralApiClient(
         [
-            new CustomerMeterPoint("c-1", "Customer 1", "broken-meter", "community-1"),
-            new CustomerMeterPoint("c-2", "Customer 2", "meter-2", "community-1")
+            new CustomerMeterPoint("c-1", "Customer 1", "broken-meter", "generation", "community-1"),
+            new CustomerMeterPoint("c-2", "Customer 2", "meter-2", "consumption", "community-1")
         ]);
         var portal = new FakeEdaPortalClient { FailedMeterId = "broken-meter" };
         var sut = CreateOrchestrator(customers, portal, new FakePublisher());
@@ -76,8 +81,8 @@ public sealed class EdaReadingOrchestratorBackfillTests
     {
         var customers = new FakeCentralApiClient(
         [
-            new CustomerMeterPoint("c-1", "Customer 1", "missing-meter", "community-1"),
-            new CustomerMeterPoint("c-2", "Customer 2", "meter-2", "community-1")
+            new CustomerMeterPoint("c-1", "Customer 1", "missing-meter", "generation", "community-1"),
+            new CustomerMeterPoint("c-2", "Customer 2", "meter-2", "consumption", "community-1")
         ]);
         var portal = new FakeEdaPortalClient { MissingMeterId = "missing-meter" };
         var publisher = new FakePublisher();
@@ -90,6 +95,38 @@ public sealed class EdaReadingOrchestratorBackfillTests
         Assert.Equal(1, response.MetersProcessed);
         Assert.Equal("meter-2", Assert.Single(publisher.MeterPublications).MeterPointNumber);
         Assert.Equal([("missing-meter", "community-1")], metrics.MissingMeters);
+    }
+
+    [Fact]
+    public async Task Manual_meter_trigger_publishes_all_community_assignments_with_their_directions()
+    {
+        var customers = new FakeCentralApiClient(
+        [
+            new CustomerMeterPoint("c-1", "Customer 1", "shared-meter", "generation", "community-1"),
+            new CustomerMeterPoint("c-1", "Customer 1", "shared-meter", "consumption", "community-2"),
+            new CustomerMeterPoint("c-2", "Customer 2", "other-meter", "consumption", "community-2")
+        ]);
+        var portal = new FakeEdaPortalClient();
+        var publisher = new FakePublisher();
+        var sut = CreateOrchestrator(customers, portal, publisher);
+
+        var result = await sut.TriggerMeterReadingAsync(new EdaTriggerRequest("shared-meter", null, null), CancellationToken.None);
+
+        Assert.Equal(2, result.ReadingCount);
+        Assert.Equal("shared-meter", result.MeterId);
+        Assert.Equal([("community-1", "shared-meter"), ("community-2", "shared-meter")], portal.MeterCalls);
+        Assert.Equal(["generation", "consumption"], publisher.MeterPublications.Select(item => item.EnergyDirection));
+    }
+
+    [Fact]
+    public async Task Manual_meter_trigger_rejects_an_unassigned_meter()
+    {
+        var sut = CreateOrchestrator(
+            new FakeCentralApiClient([new CustomerMeterPoint("c-1", "Customer 1", "other-meter", "consumption", "community-1")]),
+            new FakeEdaPortalClient(), new FakePublisher());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            sut.TriggerMeterReadingAsync(new EdaTriggerRequest("unknown-meter", null, null), CancellationToken.None));
     }
 
     [Fact]
