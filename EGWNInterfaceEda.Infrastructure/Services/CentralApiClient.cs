@@ -96,8 +96,8 @@ public sealed class CentralApiClient(HttpClient httpClient, IOptions<CentralApiO
                 var customerName = FirstNonEmpty(participation.CustomerName) ?? customerId;
                 var energyDirection = participation.EnergyDirection switch
                 {
-                    "Generation" => "generation",
-                    "Consumption" => "consumption",
+                    var direction when string.Equals(direction, "generation", StringComparison.OrdinalIgnoreCase) => "generation",
+                    var direction when string.Equals(direction, "consumption", StringComparison.OrdinalIgnoreCase) => "consumption",
                     _ => throw new InvalidOperationException(
                         $"Metering point '{meteringPointCode}' in community '{communityId}' has an invalid EnergyDirection '{participation.EnergyDirection ?? "<null>"}'")
                 };

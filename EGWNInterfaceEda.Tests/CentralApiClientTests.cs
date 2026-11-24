@@ -152,6 +152,31 @@ public sealed class CentralApiClientTests
     }
 
     [Theory]
+    [InlineData("Generation", "generation")]
+    [InlineData("generation", "generation")]
+    [InlineData("GENERATION", "generation")]
+    [InlineData("Consumption", "consumption")]
+    [InlineData("consumption", "consumption")]
+    [InlineData("CONSUMPTION", "consumption")]
+    public async Task GetCustomersAsync_accepts_energy_direction_case_insensitively(string energyDirection, string expectedDirection)
+    {
+        var handler = new StubHttpMessageHandler(request =>
+            request.RequestUri!.AbsolutePath.EndsWith("/api/auth/token", StringComparison.Ordinal)
+                ? JsonResponse("""{"accessToken":"test-token"}""")
+                : JsonResponse($$"""
+                    [{"id":"10000000-0000-0000-0000-000000000001","sourceId":"eda-community-1",
+                      "participations":[{"meteringPointId":"20000000-0000-0000-0000-000000000001",
+                                         "meteringPointCode":"meter-1","energyDirection":"{{energyDirection}}"}]}]
+                    """));
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://central.example/") };
+        var client = new CentralApiClient(httpClient, Options.Create(new CentralApiOptions()), NullLogger<CentralApiClient>.Instance);
+
+        var customer = Assert.Single(await client.GetCustomersAsync(CancellationToken.None));
+
+        Assert.Equal(expectedDirection, customer.EnergyDirection);
+    }
+
+    [Theory]
     [InlineData(null)]
     [InlineData("Unknown")]
     public async Task GetCustomersAsync_rejects_missing_or_unknown_energy_direction(string? energyDirection)
